@@ -1,0 +1,41 @@
+# Python bytecode and cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Environment files and dependencies
+.venv/
+venv/
+ENV/
+env/
+.env
+.env.local
+
+# Testing & Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Build & Distribution
+build/
+dist/
+*.egg-info/
+*.egg
+
+# DigitalShield Evidence Vault & Local Storage (never commit real evidence or cases)
+.digitalshield_data/
+cases_data/
+evidence_vault/
+*.forensic_log
+*.db
+*.sqlite
+
+# IDE & OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
