@@ -71,6 +71,87 @@ class TestCLIMain(unittest.TestCase):
         self.assertIn("EVD-2026-000001", show_res.output)
         self.assertIn("sample.txt", show_res.output)
 
+    def test_cli_evidence_fingerprint_and_compare(self):
+        from PIL import Image
+
+        # Create two sample synthetic image files
+        img1_path = self.test_dir / "img1.png"
+        img2_path = self.test_dir / "img2.png"
+        Image.new("RGB", (64, 64), color=(255, 0, 0)).save(img1_path)
+        Image.new("RGB", (64, 64), color=(0, 255, 0)).save(img2_path)
+
+        # 1. Create case
+        self.runner.invoke(cli, ["case", "create", "--name", "Image Case"])
+
+        # 2. Ingest evidence
+        self.runner.invoke(cli, ["evidence", "import", str(img1_path), "--case", "DS-2026-000001"])
+        self.runner.invoke(cli, ["evidence", "import", str(img2_path), "--case", "DS-2026-000001"])
+
+        # 3. Test fingerprint command
+        fp_res = self.runner.invoke(cli, ["evidence", "fingerprint", "EVD-2026-000001"])
+        self.assertEqual(fp_res.exit_code, 0)
+        self.assertIn("EVD-2026-000001", fp_res.output)
+        self.assertIn("aHash", fp_res.output)
+        self.assertIn("dHash", fp_res.output)
+        self.assertIn("pHash", fp_res.output)
+
+        # 4. Test compare command
+        cmp_res = self.runner.invoke(cli, ["evidence", "compare", "EVD-2026-000001", "EVD-2026-000002"])
+        self.assertEqual(cmp_res.exit_code, 0)
+        self.assertIn("EVD-2026-000001", cmp_res.output)
+        self.assertIn("EVD-2026-000002", cmp_res.output)
+        self.assertIn("Overall Similarity", cmp_res.output)
+        self.assertIn("Assessment", cmp_res.output)
+
+    def test_cli_analyze_ela(self):
+        from PIL import Image
+
+        img_path = self.test_dir / "ela_test.jpg"
+        Image.new("RGB", (100, 100), color=(100, 150, 200)).save(img_path, "JPEG", quality=90)
+
+        # 1. Create case
+        self.runner.invoke(cli, ["case", "create", "--name", "ELA CLI Case"])
+
+        # 2. Ingest evidence
+        self.runner.invoke(cli, ["evidence", "import", str(img_path), "--case", "DS-2026-000001"])
+
+        # 3. Test analyze ela command
+        ela_res = self.runner.invoke(cli, ["analyze", "ela", "EVD-2026-000001"])
+        self.assertEqual(ela_res.exit_code, 0)
+        self.assertIn("EVD-2026-000001", ela_res.output)
+        self.assertIn("Error Level Analysis", ela_res.output)
+        self.assertIn("Mean ELA Level", ela_res.output)
+        self.assertIn("Indicator Score", ela_res.output)
+        self.assertIn("Assessment", ela_res.output)
+        self.assertIn("Limitations", ela_res.output)
+
+    def test_cli_analyze_deepfake(self):
+        from PIL import Image
+
+        img_path = self.test_dir / "deepfake_cli_test.png"
+        Image.new("RGB", (512, 512), color=(220, 230, 240)).save(img_path, "PNG")
+
+        # 1. Create case
+        self.runner.invoke(cli, ["case", "create", "--name", "Deepfake CLI Case"])
+
+        # 2. Ingest evidence
+        self.runner.invoke(cli, ["evidence", "import", str(img_path), "--case", "DS-2026-000001"])
+
+        # 3. Test analyze deepfake command
+        df_res = self.runner.invoke(cli, ["analyze", "deepfake", "EVD-2026-000001"])
+        self.assertEqual(df_res.exit_code, 0)
+        self.assertIn("EVD-2026-000001", df_res.output)
+        self.assertIn("AI Deepfake Assessment", df_res.output)
+        self.assertIn("Heuristic Baseline", df_res.output)
+        self.assertIn("Synthetic Probability", df_res.output)
+        self.assertIn("Confidence", df_res.output)
+        self.assertIn("Assessment", df_res.output)
+        self.assertIn("Indicators", df_res.output)
+        self.assertIn("Limitations", df_res.output)
+
 
 if __name__ == "__main__":
     unittest.main()
+
+
+

@@ -13,6 +13,10 @@ from rich.table import Table
 
 from digitalshield.case_manager.manager import CaseManager
 from digitalshield.evidence.manager import EvidenceManager
+from digitalshield.fingerprinting.service import FingerprintService
+from digitalshield.detection.ela import ELADetector
+from digitalshield.detection.deepfake import DeepfakeAssessmentService
+from digitalshield.provenance.service import ProvenanceService
 
 # Reconfigure stdout to UTF-8 on Windows if needed
 if sys.platform == "win32":
@@ -242,6 +246,312 @@ def evidence_show(evidence_id: str):
     except Exception as e:
         console.print(f"[bold red]Error retrieving evidence:[/bold red] {e}")
         sys.exit(1)
+
+
+@evidence.command("fingerprint")
+@click.argument("evidence_id", type=str)
+def evidence_fingerprint(evidence_id: str):
+    """Generate and display perceptual fingerprints (aHash, dHash, pHash) for an evidence item."""
+    try:
+        service = FingerprintService()
+        fp = service.generate_fingerprints(evidence_id)
+
+        content = (
+            f"[bold white]Evidence ID:[/bold white]   [cyan]{fp.evidence_id}[/cyan]\n"
+            f"[bold white]Filename:[/bold white]      {fp.original_filename or 'Unknown'}\n\n"
+            f"[bold white]aHash:[/bold white]         [yellow]{fp.ahash}[/yellow]\n"
+            f"[bold white]dHash:[/bold white]         [yellow]{fp.dhash}[/yellow]\n"
+            f"[bold white]pHash:[/bold white]         [yellow]{fp.phash}[/yellow]\n\n"
+            f"[dim italic]Disclaimer: {fp.disclaimer}[/dim italic]"
+        )
+
+        console.print(Panel(content, title="[bold blue]Perceptual Fingerprints[/bold blue]", expand=False))
+
+    except Exception as e:
+        console.print(f"[bold red]Error generating fingerprints:[/bold red] {e}")
+        sys.exit(1)
+
+
+@evidence.command("compare")
+@click.argument("evidence_id_1", type=str)
+@click.argument("evidence_id_2", type=str)
+def evidence_compare(evidence_id_1: str, evidence_id_2: str):
+    """Compare perceptual fingerprints between two evidence items."""
+    try:
+        service = FingerprintService()
+        res = service.compare_fingerprints(evidence_id_1, evidence_id_2)
+
+        content = (
+            f"[bold white]Evidence A:[/bold white]            [cyan]{res.evidence_id_a}[/cyan] ({res.filename_a or 'Unknown'})\n"
+            f"[bold white]Evidence B:[/bold white]            [cyan]{res.evidence_id_b}[/cyan] ({res.filename_b or 'Unknown'})\n\n"
+            f"[bold white]aHash distance:[/bold white]        {res.metrics['aHash'].hamming_distance} / 64  "
+            f"[dim](Similarity: {res.metrics['aHash'].normalized_similarity * 100:.1f}%)[/dim]\n"
+            f"[bold white]dHash distance:[/bold white]        {res.metrics['dHash'].hamming_distance} / 64  "
+            f"[dim](Similarity: {res.metrics['dHash'].normalized_similarity * 100:.1f}%)[/dim]\n"
+            f"[bold white]pHash distance:[/bold white]        {res.metrics['pHash'].hamming_distance} / 64  "
+            f"[dim](Similarity: {res.metrics['pHash'].normalized_similarity * 100:.1f}%)[/dim]\n\n"
+            f"[bold white]Overall Similarity:[/bold white]    [bold yellow]{res.overall_similarity * 100:.1f}%[/bold yellow]\n"
+            f"[bold white]Assessment:[/bold white]            [bold green]{res.assessment}[/bold green]\n\n"
+            f"[dim italic]Disclaimer: {res.disclaimer}[/dim italic]"
+        )
+
+        console.print(Panel(content, title="[bold blue]Perceptual Similarity Comparison[/bold blue]", expand=False))
+
+    except Exception as e:
+        console.print(f"[bold red]Error comparing evidence fingerprints:[/bold red] {e}")
+        sys.exit(1)
+
+
+# ==========================================
+# Analysis & Detection Commands
+# ==========================================
+
+@cli.group()
+def analyze():
+    """Perform forensic analysis and manipulation detection on evidence."""
+    pass
+
+
+@analyze.command("ela")
+@click.argument("evidence_id", type=str)
+@click.option(
+    "-q", "--quality",
+    type=int,
+    default=90,
+    help="JPEG recompression quality for ELA (default: 90)."
+)
+def analyze_ela(evidence_id: str, quality: int):
+    """Execute Error Level Analysis (ELA) to detect potential image manipulation anomalies."""
+    try:
+        detector = ELADetector()
+        res = detector.analyze_evidence(evidence_id=evidence_id, quality=quality)
+
+        content = (
+            f"[bold white]Evidence ID:[/bold white]       [cyan]{res.evidence_id}[/cyan]\n"
+            f"[bold white]Filename:[/bold white]          {res.original_filename or 'Unknown'}\n"
+            f"[bold white]Image Dimensions:[/bold white]  {res.image_width} x {res.image_height} px ({res.color_mode})\n\n"
+            f"[bold white]Mean ELA Level:[/bold white]    {res.mean_error:.4f}\n"
+            f"[bold white]Maximum ELA Level:[/bold white] {res.max_error:.4f}\n"
+            f"[bold white]StdDev Error:[/bold white]      {res.statistics.stddev_error:.4f}\n"
+            f"[bold white]High Error Pixels:[/bold white] {res.statistics.high_error_pixels:,} ({res.statistics.high_error_ratio * 100:.2f}%)\n\n"
+            f"[bold white]Indicator Score:[/bold white]   [bold yellow]{res.anomaly_score:.4f}[/bold yellow] (0.0 = uniform, 1.0 = high anomaly)\n"
+            f"[bold white]Confidence:[/bold white]        [green]{res.confidence * 100:.1f}%[/green]\n"
+            f"[bold white]Assessment:[/bold white]        [bold cyan]{res.assessment}[/bold cyan]\n\n"
+            f"[dim italic]Limitations: {res.disclaimer}[/dim italic]"
+        )
+
+        console.print(Panel(content, title="[bold blue]Error Level Analysis (ELA) Report[/bold blue]", expand=False))
+
+    except Exception as e:
+        console.print(f"[bold red]Error executing ELA analysis:[/bold red] {e}")
+        sys.exit(1)
+
+
+@analyze.command("deepfake")
+@click.argument("evidence_id", type=str)
+def analyze_deepfake(evidence_id: str):
+    """Perform probabilistic AI-based synthetic media / deepfake assessment."""
+    try:
+        service = DeepfakeAssessmentService()
+        res = service.assess_evidence(evidence_id=evidence_id)
+
+        indicators_text = "\n".join([f"  • {ind}" for ind in res.indicators]) if res.indicators else "  None"
+        limitations_text = "\n".join([f"  • {lim}" for lim in res.limitations]) if res.limitations else "  None"
+
+        content = (
+            f"[bold white]Evidence ID:[/bold white]          [cyan]{res.evidence_id}[/cyan]\n"
+            f"[bold white]Filename:[/bold white]             {res.original_filename or 'Unknown'}\n\n"
+            f"[bold white]Detector:[/bold white]             {res.detector_name}\n"
+            f"[bold white]Detector Type:[/bold white]        [yellow]{res.detector_type.value.title()}[/yellow]\n\n"
+            f"[bold white]Synthetic Probability:[/bold white] [bold yellow]{res.synthetic_probability:.2f}[/bold yellow] (0.0 to 1.0)\n"
+            f"[bold white]Confidence:[/bold white]           [green]{res.confidence * 100:.1f}%[/green]\n\n"
+            f"[bold white]Assessment:[/bold white]\n[bold cyan]{res.assessment}[/bold cyan]\n\n"
+            f"[bold white]Indicators:[/bold white]\n{indicators_text}\n\n"
+            f"[bold white]Limitations:[/bold white]\n[dim italic]{limitations_text}[/dim italic]\n\n"
+            f"[dim]Important: The displayed confidence must NOT be interpreted as certainty that the image is fake. "
+            f"Assessments are probabilistic indicators and never infer authorship, identity, or criminal responsibility.[/dim]"
+        )
+
+        console.print(Panel(content, title="[bold blue]AI Deepfake Assessment[/bold blue]", expand=False))
+
+    except Exception as e:
+        console.print(f"[bold red]Error executing deepfake assessment:[/bold red] {e}")
+        sys.exit(1)
+
+
+# ==========================================
+# Provenance Commands
+# ==========================================
+
+@cli.group()
+def provenance():
+    """Analyze public URL provenance and origin timelines."""
+    pass
+
+
+@provenance.command("add")
+@click.argument("evidence_id", type=str)
+@click.argument("public_url", type=str)
+@click.option("-a", "--account", "account_name", type=str, default=None, help="Publicly visible account name or handle.")
+@click.option("-m", "--media-url", "media_url", type=str, default=None, help="Public media URL for visual similarity matching.")
+@click.option("-t", "--source-timestamp", "source_timestamp", type=str, default=None, help="Explicit visible timestamp from source page.")
+@click.option("-n", "--notes", type=str, default=None, help="Investigator notes.")
+def provenance_add(
+    evidence_id: str,
+    public_url: str,
+    account_name: Optional[str],
+    media_url: Optional[str],
+    source_timestamp: Optional[str],
+    notes: Optional[str]
+):
+    """Record a public URL provenance observation for an evidence item."""
+    try:
+        service = ProvenanceService()
+        rec = service.record_provenance(
+            evidence_id=evidence_id,
+            source_url=public_url,
+            observed_account_name=account_name,
+            media_url=media_url,
+            source_timestamp=source_timestamp,
+            notes=notes
+        )
+
+        sim_str = f"{rec.similarity_score * 100:.1f}%" if rec.similarity_score is not None else "N/A"
+        match_str = rec.matching_method or "None"
+        media_match_status = "Matched" if rec.similarity_score is not None else "No media compared"
+        limitations_text = "\n".join([f"  • {lim}" for lim in rec.limitations]) if rec.limitations else "  None"
+
+        content = (
+            f"[bold white]Provenance ID:[/bold white]     [cyan]{rec.provenance_id}[/cyan]\n"
+            f"[bold white]Evidence ID:[/bold white]       [cyan]{rec.evidence_id}[/cyan]\n"
+            f"[bold white]Source URL:[/bold white]        {rec.source_url}\n"
+            f"[bold white]Source Domain:[/bold white]     {rec.source_domain}\n"
+            f"[bold white]Discovery Time:[/bold white]    {rec.discovery_timestamp}\n"
+            f"[bold white]Observed Account:[/bold white]  {rec.observed_account_name or 'Unknown'}\n"
+            f"[bold white]Media Match:[/bold white]       {media_match_status}\n"
+            f"[bold white]Similarity:[/bold white]        [bold yellow]{sim_str}[/bold yellow]\n"
+            f"[bold white]Matching Method:[/bold white]   {match_str}\n\n"
+            f"[bold white]Assessment:[/bold white]\n[bold cyan]{rec.assessment}[/bold cyan]\n\n"
+            f"[bold white]Limitations:[/bold white]\n[dim italic]{limitations_text}[/dim italic]"
+        )
+
+        console.print(Panel(content, title="[bold blue]Provenance Record[/bold blue]", expand=False))
+
+    except Exception as e:
+        console.print(f"[bold red]Error recording provenance:[/bold red] {e}")
+        sys.exit(1)
+
+
+@provenance.command("list")
+@click.option("-c", "--case", "case_id", type=str, required=True, help="Target Case ID.")
+def provenance_list(case_id: str):
+    """List all public URL provenance records associated with a case."""
+    try:
+        service = ProvenanceService()
+        records = service.list_provenance_by_case(case_id)
+
+        if not records:
+            console.print(f"[yellow]No provenance records found for case '{case_id}'.[/yellow]")
+            return
+
+        table = Table(title=f"Public URL Provenance Records in Case {case_id}")
+        table.add_column("Provenance ID", style="cyan", no_wrap=True)
+        table.add_column("Evidence ID", style="cyan", no_wrap=True)
+        table.add_column("Domain", style="white")
+        table.add_column("Observed Account", style="magenta")
+        table.add_column("Similarity", style="yellow", justify="right")
+        table.add_column("Discovery Time", style="dim")
+
+        for r in records:
+            sim_display = f"{r.similarity_score * 100:.1f}%" if r.similarity_score is not None else "N/A"
+            table.add_row(
+                r.provenance_id,
+                r.evidence_id,
+                r.source_domain,
+                r.observed_account_name or "Unknown",
+                sim_display,
+                r.discovery_timestamp[:19].replace("T", " ")
+            )
+
+        console.print(table)
+
+    except Exception as e:
+        console.print(f"[bold red]Error listing provenance records:[/bold red] {e}")
+        sys.exit(1)
+
+
+@provenance.command("show")
+@click.argument("provenance_id", type=str)
+def provenance_show(provenance_id: str):
+    """Show detailed provenance record."""
+    try:
+        service = ProvenanceService()
+        rec = service.get_provenance(provenance_id)
+
+        if not rec:
+            console.print(f"[bold red]Error:[/bold red] Provenance record '{provenance_id}' not found.")
+            sys.exit(1)
+
+        sim_str = f"{rec.similarity_score * 100:.1f}%" if rec.similarity_score is not None else "N/A"
+        match_str = rec.matching_method or "None"
+        media_match_status = "Matched" if rec.similarity_score is not None else "No media compared"
+        limitations_text = "\n".join([f"  • {lim}" for lim in rec.limitations]) if rec.limitations else "  None"
+
+        content = (
+            f"[bold white]Provenance ID:[/bold white]     [cyan]{rec.provenance_id}[/cyan]\n"
+            f"[bold white]Case ID:[/bold white]           {rec.case_id}\n"
+            f"[bold white]Evidence ID:[/bold white]       [cyan]{rec.evidence_id}[/cyan]\n"
+            f"[bold white]Source URL:[/bold white]        {rec.source_url}\n"
+            f"[bold white]Source Domain:[/bold white]     {rec.source_domain}\n"
+            f"[bold white]Page Title:[/bold white]        {rec.source_title or 'Unknown'}\n"
+            f"[bold white]Discovery Time:[/bold white]    {rec.discovery_timestamp}\n"
+            f"[bold white]Observed Account:[/bold white]  {rec.observed_account_name or 'Unknown'}\n"
+            f"[bold white]Source Timestamp:[/bold white]  {rec.source_timestamp or 'Unknown / Unspecified'}\n"
+            f"[bold white]Media Match:[/bold white]       {media_match_status}\n"
+            f"[bold white]Similarity:[/bold white]        [bold yellow]{sim_str}[/bold yellow]\n"
+            f"[bold white]Matching Method:[/bold white]   {match_str}\n\n"
+            f"[bold white]Assessment:[/bold white]\n[bold cyan]{rec.assessment}[/bold cyan]\n\n"
+            f"[bold white]Limitations:[/bold white]\n[dim italic]{limitations_text}[/dim italic]"
+        )
+
+        console.print(Panel(content, title=f"[bold blue]Provenance Record - {rec.provenance_id}[/bold blue]", expand=False))
+
+    except Exception as e:
+        console.print(f"[bold red]Error showing provenance record:[/bold red] {e}")
+        sys.exit(1)
+
+
+@provenance.command("timeline")
+@click.argument("evidence_id", type=str)
+def provenance_timeline(evidence_id: str):
+    """Generate and display evidence-supported origin timeline."""
+    try:
+        service = ProvenanceService()
+        timeline_data = service.get_provenance_timeline(evidence_id)
+
+        table = Table(title=f"Origin Timeline for Evidence {evidence_id}")
+        table.add_column("Event Type", style="cyan", no_wrap=True)
+        table.add_column("Timestamp", style="yellow", no_wrap=True)
+        table.add_column("Source / Location", style="white")
+        table.add_column("Description / Assessment", style="dim")
+
+        for event in timeline_data["timeline"]:
+            table.add_row(
+                event["event_type"],
+                str(event.get("timestamp") or "Unknown"),
+                event.get("source", "Internal Vault"),
+                event.get("description", "")
+            )
+
+        console.print(table)
+        console.print(f"[dim italic]Disclaimer: {timeline_data['disclaimer']}[/dim italic]")
+
+    except Exception as e:
+        console.print(f"[bold red]Error generating provenance timeline:[/bold red] {e}")
+        sys.exit(1)
+
+
+
 
 
 def main(args: Optional[List[str]] = None) -> int:
