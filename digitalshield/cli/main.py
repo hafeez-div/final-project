@@ -17,6 +17,7 @@ from digitalshield.fingerprinting.service import FingerprintService
 from digitalshield.detection.ela import ELADetector
 from digitalshield.detection.deepfake import DeepfakeAssessmentService
 from digitalshield.provenance.service import ProvenanceService
+from digitalshield.reporting.service import ReportingService
 
 # Reconfigure stdout to UTF-8 on Windows if needed
 if sys.platform == "win32":
@@ -551,7 +552,125 @@ def provenance_timeline(evidence_id: str):
         sys.exit(1)
 
 
+# ==========================================
+# Report Commands
+# ==========================================
 
+@cli.group()
+def report():
+    """Generate, list, and inspect forensic analysis reports."""
+    pass
+
+
+@report.command("generate")
+@click.argument("case_id", type=str)
+@click.option(
+    "-f", "--format", "report_format",
+    type=click.Choice(["markdown", "html", "pdf", "all"], case_sensitive=False),
+    default="all",
+    help="Report output format: markdown, html, pdf, or all (default: all)."
+)
+def report_generate(case_id: str, report_format: str):
+    """Generate a comprehensive forensic analysis report for a case."""
+    try:
+        service = ReportingService()
+        rec, output_paths = service.generate_report(case_id=case_id, formats=report_format)
+
+        files_list = "\n".join([f"  • [bold white]{fmt.upper()}:[/bold white] [dim]{p}[/dim]" for fmt, p in output_paths.items()])
+
+        content = (
+            f"[bold green]+ Forensic report generated successfully[/bold green]\n\n"
+            f"[bold white]Report ID:[/bold white]          [cyan]{rec.report_id}[/cyan]\n"
+            f"[bold white]Case ID:[/bold white]            {rec.case_id}\n"
+            f"[bold white]Generation Time:[/bold white]    {rec.generation_timestamp}\n"
+            f"[bold white]Formats Created:[/bold white]    {', '.join(rec.formats_generated).upper()}\n\n"
+            f"[bold white]Generated Files:[/bold white]\n{files_list}\n\n"
+            f"[dim italic]Reports are stored locally in .digitalshield_data/cases/{rec.case_id}/reports/[/dim italic]"
+        )
+
+        console.print(Panel(content, title="[bold blue]DigitalShield Forensic Report[/bold blue]", expand=False))
+
+    except Exception as e:
+        console.print(f"[bold red]Error generating forensic report:[/bold red] {e}")
+        sys.exit(1)
+
+
+@report.command("list")
+@click.option("-c", "--case", "case_id", type=str, required=True, help="Target Case ID.")
+def report_list(case_id: str):
+    """List all generated forensic reports associated with a case."""
+    try:
+        service = ReportingService()
+        reports = service.list_reports_by_case(case_id)
+
+        if not reports:
+            console.print(f"[yellow]No reports found for case '{case_id}'. Generate one using 'digitalshield report generate {case_id}'.[/yellow]")
+            return
+
+        table = Table(title=f"Generated Forensic Reports in Case {case_id}")
+        table.add_column("Report ID", style="cyan", no_wrap=True)
+        table.add_column("Case ID", style="white", no_wrap=True)
+        table.add_column("Formats", style="magenta")
+        table.add_column("Generated At", style="dim")
+        table.add_column("Status", style="green")
+
+        for r in reports:
+            table.add_row(
+                r.report_id,
+                r.case_id,
+                ", ".join(r.formats_generated).upper(),
+                r.generation_timestamp[:19].replace("T", " "),
+                r.status
+            )
+
+        console.print(table)
+
+    except Exception as e:
+        console.print(f"[bold red]Error listing reports:[/bold red] {e}")
+        sys.exit(1)
+
+
+@report.command("show")
+@click.argument("report_id", type=str)
+def report_show(report_id: str):
+    """Show details and file paths of a generated forensic report."""
+    try:
+        service = ReportingService()
+        rec = service.get_report(report_id)
+
+        if not rec:
+            console.print(f"[bold red]Error:[/bold red] Report ID '{report_id}' not found.")
+            sys.exit(1)
+
+        files_list = "\n".join([f"  • [bold white]{fmt.upper()}:[/bold white] [dim]{p}[/dim]" for fmt, p in rec.files.items()])
+
+        content = (
+            f"[bold white]Report ID:[/bold white]          [cyan]{rec.report_id}[/cyan]\n"
+            f"[bold white]Case ID:[/bold white]            {rec.case_id}\n"
+            f"[bold white]Generation Time:[/bold white]    {rec.generation_timestamp}\n"
+            f"[bold white]Status:[/bold white]             [green]{rec.status}[/green]\n"
+            f"[bold white]Formats:[/bold white]            {', '.join(rec.formats_generated).upper()}\n\n"
+            f"[bold white]Report Files:[/bold white]\n{files_list}"
+        )
+
+        console.print(Panel(content, title=f"[bold blue]Report Details - {rec.report_id}[/bold blue]", expand=False))
+
+    except Exception as e:
+        console.print(f"[bold red]Error retrieving report:[/bold red] {e}")
+
+# ==========================================
+# GUI Command
+# ==========================================
+
+@cli.command("gui")
+def launch_gui_command():
+    """Launch the DigitalShield Desktop Graphical User Interface."""
+    try:
+        from digitalshield.gui.app import launch_gui
+        launch_gui()
+    except Exception as e:
+        console.print(f"[bold red]Error launching GUI:[/bold red] {e}")
+        sys.exit(1)
 
 
 def main(args: Optional[List[str]] = None) -> int:

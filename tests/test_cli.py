@@ -149,9 +149,44 @@ class TestCLIMain(unittest.TestCase):
         self.assertIn("Indicators", df_res.output)
         self.assertIn("Limitations", df_res.output)
 
+    def test_cli_report_generate_list_show(self):
+        # 1. Create case
+        self.runner.invoke(cli, ["case", "create", "--name", "Report CLI Case", "--investigator", "Agent Smith"])
+
+        # 2. Import evidence
+        self.runner.invoke(cli, ["evidence", "import", str(self.sample_txt), "--case", "DS-2026-000001"])
+
+        # 3. Generate report (markdown)
+        gen_res = self.runner.invoke(cli, ["report", "generate", "DS-2026-000001", "--format", "markdown"])
+        self.assertEqual(gen_res.exit_code, 0)
+        self.assertIn("Forensic report generated successfully", gen_res.output)
+        self.assertIn("RPT-", gen_res.output)
+
+        # Extract Report ID
+        report_id = None
+        for line in gen_res.output.splitlines():
+            if "RPT-" in line:
+                for part in line.split():
+                    if part.startswith("RPT-"):
+                        report_id = part.strip()
+                        break
+        self.assertIsNotNone(report_id)
+
+        # 4. List reports
+        list_res = self.runner.invoke(cli, ["report", "list", "--case", "DS-2026-000001"])
+        self.assertEqual(list_res.exit_code, 0)
+        self.assertIn(report_id, list_res.output)
+
+        # 5. Show report
+        show_res = self.runner.invoke(cli, ["report", "show", report_id])
+        self.assertEqual(show_res.exit_code, 0)
+        self.assertIn(report_id, show_res.output)
+        self.assertIn("DS-2026-000001", show_res.output)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 
 

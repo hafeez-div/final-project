@@ -23,6 +23,7 @@ class JSONStore:
         self.ela_file = self.base_dir / "ela.json"
         self.deepfake_file = self.base_dir / "deepfake.json"
         self.provenance_file = self.base_dir / "provenance.json"
+        self.reports_file = self.base_dir / "reports.json"
         self.base_dir.mkdir(parents=True, exist_ok=True)
         if not self.cases_file.exists():
             self._write_file(self.cases_file, {})
@@ -38,6 +39,8 @@ class JSONStore:
             self._write_file(self.deepfake_file, {})
         if not self.provenance_file.exists():
             self._write_file(self.provenance_file, {})
+        if not self.reports_file.exists():
+            self._write_file(self.reports_file, {})
 
     def _read_file(self, target_file: Path) -> Dict[str, dict]:
         if not target_file.exists():
@@ -190,6 +193,32 @@ class JSONStore:
     def list_provenance(self) -> List[dict]:
         """Return a list of all stored provenance records."""
         data = self._read_file(self.provenance_file)
+        return list(data.values())
+
+    # --- Report Generation Methods ---
+    def save_report(self, report_dict: dict) -> None:
+        """Save or update report record in the JSON store."""
+        data = self._read_file(self.reports_file)
+        report_id = report_dict["report_id"]
+        data[report_id] = report_dict
+        self._write_file(self.reports_file, data)
+
+    def get_report(self, report_id: str) -> Optional[dict]:
+        """Retrieve report record by Report ID."""
+        data = self._read_file(self.reports_file)
+        return data.get(report_id)
+
+    def list_reports_by_case(self, case_id: str) -> List[dict]:
+        """Return a list of all report records associated with a specific Case ID."""
+        data = self._read_file(self.reports_file)
+        return [
+            item for item in data.values()
+            if item.get("case_id") == case_id
+        ]
+
+    def list_reports(self) -> List[dict]:
+        """Return a list of all stored report records."""
+        data = self._read_file(self.reports_file)
         return list(data.values())
 
 

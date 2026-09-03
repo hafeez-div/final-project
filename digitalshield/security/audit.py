@@ -62,3 +62,33 @@ class AuditLogger:
             f.write(json.dumps(payload) + "\n")
 
         return payload
+
+    def list_events(self) -> list[Dict[str, Any]]:
+        """
+        Read and return all audit log entries in chronological order.
+        """
+        if not self.log_path.exists():
+            return []
+        events = []
+        try:
+            with open(self.log_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        events.append(json.loads(line))
+        except Exception:
+            pass
+        return events
+
+    def get_events_by_case(self, case_id: str) -> list[Dict[str, Any]]:
+        """
+        Retrieve all audit events associated with a specific Case ID.
+        """
+        all_events = self.list_events()
+        matching = []
+        for event in all_events:
+            details = event.get("details", {})
+            if details.get("case_id") == case_id:
+                matching.append(event)
+        return matching
+
