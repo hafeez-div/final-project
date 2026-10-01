@@ -26,6 +26,19 @@ class ProgressScreen(ttk.Frame):
         self.app = app
         self.step_labels = []
         self._build_ui()
+        self.bind("<Destroy>", self._on_destroy)
+
+    def _on_destroy(self, event=None):
+        """Clean up background progressbar animation when destroyed."""
+        self.stop()
+
+    def stop(self):
+        """Stop progress bar animation safely."""
+        try:
+            if hasattr(self, "prog_bar"):
+                self.prog_bar.stop()
+        except Exception:
+            pass
 
     def _build_ui(self):
         container = ttk.Frame(self)

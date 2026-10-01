@@ -332,6 +332,36 @@ class TestReportingSubsystem(unittest.TestCase):
         md2 = MarkdownRenderer.render(data2)
         self.assertEqual(md1, md2)
 
+    # 35. Regression Test (Issue 2): Accurate format rendering across Markdown, HTML, and PDF
+    def test_report_format_rendering_jpeg_and_png(self):
+        # 1. Ingest real JPEG and PNG
+        png_path = self.test_dir / "format_test.png"
+        Image.new("RGB", (64, 64), color=(10, 20, 30)).save(png_path, "PNG")
+        ev_png = self.evidence_manager.import_evidence(png_path, self.case_id)
+
+        self.meta_extractor.extract(self.evidence_id)  # JPEG
+        self.meta_extractor.extract(ev_png.evidence_id)  # PNG
+
+        data = self.reporting_service.compile_report_data(self.case_id)
+        
+        # Markdown
+        md = MarkdownRenderer.render(data)
+        self.assertIn("image/jpeg", md)
+        self.assertIn("image/png", md)
+        self.assertIn("JPEG", md)
+        self.assertIn("PNG", md)
+
+        # HTML
+        html = HTMLRenderer.render(data)
+        self.assertIn("image/jpeg", html)
+        self.assertIn("image/png", html)
+        self.assertIn("JPEG", html)
+        self.assertIn("PNG", html)
+
+        # PDF
+        buf = io.BytesIO()
+        PDFRenderer.render(data, buf)
+        self.assertGreater(buf.tell(), 1000)
 
 
 if __name__ == "__main__":

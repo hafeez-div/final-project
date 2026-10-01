@@ -98,8 +98,8 @@ class OpenCaseScreen(ttk.Frame):
         for item in self.tree.get_children():
             self.tree.delete(item)
 
-        case_mgr = CaseManager()
-        ev_mgr = EvidenceManager()
+        case_mgr = CaseManager(base_dir=self.app.base_dir)
+        ev_mgr = EvidenceManager(base_dir=self.app.base_dir)
         cases = case_mgr.list_cases()
 
         for c in reversed(cases):
@@ -120,9 +120,9 @@ class OpenCaseScreen(ttk.Frame):
             return
 
         case_id = sel[0]
-        case_mgr = CaseManager()
-        ev_mgr = EvidenceManager()
-        store = JSONStore()
+        case_mgr = CaseManager(base_dir=self.app.base_dir)
+        ev_mgr = EvidenceManager(base_dir=self.app.base_dir)
+        store = JSONStore(base_dir=self.app.base_dir)
 
         case = case_mgr.get_case(case_id)
         if not case:
@@ -137,6 +137,7 @@ class OpenCaseScreen(ttk.Frame):
         fp = store.get_fingerprints(ev.evidence_id) if ev else None
         ela = store.get_ela(ev.evidence_id) if ev else None
         df = store.get_deepfake(ev.evidence_id) if ev else None
+        prov = store.list_provenance_by_case(case_id)
 
         # Save to app state
         self.app.case_data = {
@@ -146,6 +147,7 @@ class OpenCaseScreen(ttk.Frame):
             "fingerprints": fp,
             "ela": ela,
             "deepfake": df,
+            "provenance": prov,
         }
 
         # Show results screen

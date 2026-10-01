@@ -192,6 +192,8 @@ class MetadataExtractor:
                 img.load()  # load pixel data so we can close file handle safely
 
             base["file_format"] = img.format or None
+            if img.format and hasattr(Image, "MIME") and img.format in Image.MIME:
+                base["mime_type"] = Image.MIME[img.format]
             base["width_px"] = img.width
             base["height_px"] = img.height
             base["color_mode"] = img.mode

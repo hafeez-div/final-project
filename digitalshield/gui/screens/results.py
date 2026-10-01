@@ -148,6 +148,14 @@ class ResultsScreen(ttk.Frame):
         )
         details_btn.pack(side="left")
 
+        prov_btn = ttk.Button(
+            btn_bar,
+            text="🌐  Public Source / Provenance",
+            style="Outline.TButton",
+            command=lambda: self.app.show_screen("provenance"),
+        )
+        prov_btn.pack(side="left", padx=10)
+
         report_btn = ttk.Button(
             btn_bar,
             text="📄  Generate Forensic Report",

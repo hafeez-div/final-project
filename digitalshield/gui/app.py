@@ -15,6 +15,7 @@ from digitalshield.gui.screens.new_case import NewCaseScreen
 from digitalshield.gui.screens.progress import ProgressScreen
 from digitalshield.gui.screens.results import ResultsScreen
 from digitalshield.gui.screens.details import DetailsScreen
+from digitalshield.gui.screens.provenance import ProvenanceScreen
 from digitalshield.gui.screens.reports import ReportsScreen
 from digitalshield.gui.screens.open_case import OpenCaseScreen
 
@@ -55,6 +56,7 @@ class DigitalShieldApp(tk.Tk):
             (ProgressScreen, "progress"),
             (ResultsScreen, "results"),
             (DetailsScreen, "details"),
+            (ProvenanceScreen, "provenance"),
             (ReportsScreen, "reports"),
             (OpenCaseScreen, "open_case"),
         ]:
@@ -82,9 +84,7 @@ class DigitalShieldApp(tk.Tk):
         if screen:
             if name == "open_case" and hasattr(screen, "refresh_cases"):
                 screen.refresh_cases()
-            elif name == "results" and hasattr(screen, "load_data") and self.case_data:
-                screen.load_data(self.case_data)
-            elif name == "details" and hasattr(screen, "load_data") and self.case_data:
+            elif name in ("results", "details", "provenance") and hasattr(screen, "load_data") and self.case_data:
                 screen.load_data(self.case_data)
 
             screen.tkraise()
@@ -123,10 +123,14 @@ class DigitalShieldApp(tk.Tk):
                     if progress_screen:
                         progress_screen.set_step_completed(msg.get("step", 0), msg.get("msg", ""))
                 elif m_type == "complete":
+                    if progress_screen:
+                        progress_screen.stop()
                     self.case_data = msg.get("data", {})
                     self.show_screen("results")
                     return
                 elif m_type == "error":
+                    if progress_screen:
+                        progress_screen.stop()
                     err = msg.get("error", "Unknown error")
                     messagebox.showerror("Analysis Error", f"Forensic analysis failed:\n{err}")
                     self.show_screen("new_case")

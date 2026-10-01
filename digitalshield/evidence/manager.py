@@ -61,12 +61,31 @@ class EvidenceManager:
     @staticmethod
     def infer_mime_type(file_path: Path) -> str:
         """
-        Infer MIME type from supported extensions map or Python's mimetypes module.
+        Infer MIME type from file header magic bytes when accessible,
+        falling back to the supported extensions map and mimetypes module.
         """
-        ext = file_path.suffix.lower()
+        p = Path(file_path)
+        if p.exists() and p.is_file() and p.stat().st_size >= 4:
+            try:
+                with open(p, "rb") as f:
+                    header = f.read(32)
+                if header.startswith(b"\x89PNG\r\n\x1a\n"):
+                    return "image/png"
+                if header.startswith(b"\xff\xd8\xff"):
+                    return "image/jpeg"
+                if header.startswith(b"GIF87a") or header.startswith(b"GIF89a"):
+                    return "image/gif"
+                if len(header) >= 12 and header.startswith(b"RIFF") and header[8:12] == b"WEBP":
+                    return "image/webp"
+                if header.startswith(b"%PDF"):
+                    return "application/pdf"
+            except Exception:
+                pass
+
+        ext = p.suffix.lower()
         if ext in SUPPORTED_EXTENSIONS:
             return SUPPORTED_EXTENSIONS[ext]
-        mime, _ = mimetypes.guess_type(str(file_path))
+        mime, _ = mimetypes.guess_type(str(p))
         return mime or "application/octet-stream"
 
     def _generate_evidence_id(self) -> str:

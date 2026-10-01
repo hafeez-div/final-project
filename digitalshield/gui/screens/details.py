@@ -1,8 +1,10 @@
 import tkinter as tk
 from tkinter import ttk
+from pathlib import Path
 from typing import Any, Optional
 
 from digitalshield.gui.theme import Colors, Fonts
+from digitalshield.provenance.service import ProvenanceService
 from digitalshield.security.audit import AuditLogger
 
 
@@ -55,7 +57,9 @@ class DetailsScreen(ttk.Frame):
         self.ela_tab = self._create_scrollable_tab("Error Level Analysis")
         # Tab 5: Deepfake
         self.df_tab = self._create_scrollable_tab("Synthetic Media")
-        # Tab 6: Audit Log
+        # Tab 6: Provenance
+        self.prov_tab = self._create_scrollable_tab("Public Provenance")
+        # Tab 7: Audit Log
         self.audit_tab = self._create_scrollable_tab("Audit Trail")
 
     def _create_scrollable_tab(self, label: str) -> ttk.Frame:
@@ -259,14 +263,61 @@ class DetailsScreen(ttk.Frame):
             t5.insert("end", "No deepfake assessment record available.\n")
         t5.config(state="disabled")
 
-        # 6. Audit Tab
-        t6 = self.audit_tab.text_widget
+        # 6. Public Provenance Tab
+        t6 = self.prov_tab.text_widget
         t6.config(state="normal")
         t6.delete("1.0", "end")
-        t6.insert("end", "=== CASE AUDIT TRAIL & CHAIN OF CUSTODY ===\n\n")
+        t6.insert("end", "=== PUBLIC SOURCE OBSERVATIONS & MEDIA PROVENANCE ===\n\n")
+        
+        raw_bdir = getattr(self.app, "base_dir", None)
+        base_dir = Path(raw_bdir) if isinstance(raw_bdir, (str, Path)) else None
+
         if case:
             cid = _get_val(case, "case_id")
-            log_path = (self.app.base_dir / "audit.log") if self.app.base_dir else None
+            try:
+                prov_service = ProvenanceService(base_dir=base_dir)
+                records = prov_service.list_provenance_by_case(cid) if cid else []
+            except Exception:
+                records = []
+
+            if records:
+                t6.insert("end", f"Total Provenance Observations: {len(records)}\n\n")
+                for r in records:
+                    pid = _get_val(r, "provenance_id", "N/A")
+                    url = _get_val(r, "source_url", "N/A")
+                    domain = _get_val(r, "source_domain", "N/A")
+                    title_s = _get_val(r, "source_title") or "Not recorded"
+                    account = _get_val(r, "observed_account_name") or "Not recorded"
+                    sim = _get_val(r, "similarity_score")
+                    sim_str = f"{sim:.4f} ({_get_val(r, 'matching_method') or 'Perceptual hashing'})" if sim is not None else "Not performed (no public media extracted)"
+                    status = _get_val(r, "source_status", "N/A")
+                    ts = (_get_val(r, "discovery_timestamp") or "N/A")[:19].replace("T", " ")
+                    assess = _get_val(r, "assessment", "N/A")
+
+                    t6.insert("end", f"--- Observation [{pid}] ---\n")
+                    t6.insert("end", f"Source Domain:       {domain}\n")
+                    t6.insert("end", f"Public URL:          {url}\n")
+                    t6.insert("end", f"Source Page Title:   {title_s}\n")
+                    t6.insert("end", f"Observed Account:    {account}\n")
+                    t6.insert("end", f"Observation Time:    {ts} UTC\n")
+                    t6.insert("end", f"Access Status:       {status}\n")
+                    t6.insert("end", f"Visual Similarity:   {sim_str}\n")
+                    t6.insert("end", f"Assessment:\n  {assess}\n\n")
+            else:
+                t6.insert("end", "No public provenance records registered for this case.\n")
+                t6.insert("end", "Navigate to 'Public Source / Provenance' from the Results screen to record public observations.\n")
+        else:
+            t6.insert("end", "No active case selected.\n")
+        t6.config(state="disabled")
+
+        # 7. Audit Tab
+        t7 = self.audit_tab.text_widget
+        t7.config(state="normal")
+        t7.delete("1.0", "end")
+        t7.insert("end", "=== CASE AUDIT TRAIL & CHAIN OF CUSTODY ===\n\n")
+        if case:
+            cid = _get_val(case, "case_id")
+            log_path = (base_dir / "audit.log") if base_dir else None
             audit_logger = AuditLogger(log_path=log_path)
             events = audit_logger.get_events_by_case(cid) if cid else []
             if events:
@@ -275,9 +326,9 @@ class DetailsScreen(ttk.Frame):
                     act = e.get("action", "")
                     actor = e.get("actor", "")
                     ehash = e.get("entry_hash", "")[:16] + "..." if e.get("entry_hash") else "N/A"
-                    t6.insert("end", f"[{ts}] {act:<30} Actor: {actor:<20} Hash: {ehash}\n")
+                    t7.insert("end", f"[{ts}] {act:<30} Actor: {actor:<20} Hash: {ehash}\n")
             else:
-                t6.insert("end", "No case-specific audit entries found.\n")
+                t7.insert("end", "No case-specific audit entries found.\n")
         else:
-            t6.insert("end", "No active case selected.\n")
-        t6.config(state="disabled")
+            t7.insert("end", "No active case selected.\n")
+        t7.config(state="disabled")
