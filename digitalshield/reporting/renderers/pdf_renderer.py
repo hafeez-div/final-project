@@ -211,6 +211,32 @@ class PDFRenderer:
         story.append(t_case)
         story.append(Spacer(1, 8))
 
+        # --- Reported Public Source URL ---
+        story.append(Paragraph("Reported Public Source URL", h2_style))
+        if report.reported_source_url:
+            source_rows = [
+                [Paragraph("Reported Source URL:", meta_label), Paragraph(report.reported_source_url, code_style)],
+                [Paragraph("Source Information:", meta_label), Paragraph("URL supplied by the investigator.", body_style)],
+                [Paragraph("Verification Status:", meta_label), Paragraph(report.reported_source_url_status or "Not independently verified.", body_style)],
+                [Paragraph("Recorded (UTC):", meta_label), Paragraph(report.reported_source_url_recorded_at or "Not recorded", body_style)],
+                [Paragraph("Associated Case ID:", meta_label), Paragraph(meta.case_id, code_style)],
+            ]
+            if report.reported_source_url_evidence_id:
+                source_rows.append([Paragraph("Associated Evidence ID:", meta_label), Paragraph(report.reported_source_url_evidence_id, code_style)])
+            t_source = Table(source_rows, colWidths=[120, 384])
+            t_source.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#ffffff")),
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#e2e8f0")),
+                ("TOPPADDING", (0, 0), (-1, -1), 3),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ]))
+            story.append(t_source)
+            story.append(Spacer(1, 3))
+            story.append(Paragraph("Note: URL supplied by investigator as reported observation location. Not proof of authorship or ownership.", callout_style))
+        else:
+            story.append(Paragraph("No public source URL was provided by the investigator.", body_style))
+        story.append(Spacer(1, 8))
+
         # --- Section 2: Evidence Inventory ---
         story.append(Paragraph("2. Evidence Inventory & Cryptographic Baseline", h2_style))
         story.append(Paragraph("SHA-256 digests represent the preserved, read-only baseline copies in local vaults.", callout_style))
@@ -299,10 +325,10 @@ class PDFRenderer:
             for ev_id, ela in report.ela_findings.items():
                 if not ela:
                     continue
-                stats = ela.get("statistics", {})
+                story.append(Paragraph(f"Evidence {ev_id} Error Level Analysis", h3_style))
                 ela_rows = [
                     [Paragraph("Mean / Max Error:", meta_label), Paragraph(f"{ela.get('mean_error', 0.0):.4f} / {ela.get('max_error', 0.0):.4f}", body_style)],
-                    [Paragraph("Anomaly Score / Conf:", meta_label), Paragraph(f"{ela.get('anomaly_score', 0.0):.4f} (Conf: {ela.get('confidence', 0.0)*100:.1f}%)", body_style)],
+                    [Paragraph("Anomaly Score:", meta_label), Paragraph(f"<b>{ela.get('anomaly_score', 0.0):.4f}</b> (Confidence: {ela.get('confidence', 0.0)*100:.0f}%)", body_style)],
                     [Paragraph("Assessment:", meta_label), Paragraph(ela.get("assessment", ""), body_style)],
                 ]
                 t_ela = Table(ela_rows, colWidths=[120, 384])
@@ -312,31 +338,24 @@ class PDFRenderer:
                     ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
                 ]))
                 story.append(t_ela)
-                story.append(Paragraph("Disclaimer: ELA is a probabilistic derived forensic indicator and cannot independently prove forgery.", callout_style))
+                story.append(Paragraph(f"Limitation: {ela.get('disclaimer', '')}", callout_style))
                 story.append(Spacer(1, 4))
 
-        # --- Section 6: AI-Assisted Assessment (Deepfake) ---
+        # --- Section 6: Deepfake Assessment ---
         if report.deepfake_findings:
-            story.append(Paragraph("6. AI-Assisted Assessment — Deepfake & Synthetic Media", h2_style))
-            # Warning block
-            w_table = Table([[Paragraph("<b>Forensic Caution:</b> AI-assisted findings are probabilistic indicators and should not be treated as definitive proof of manipulation, identity, authorship, ownership, or criminal responsibility.", warning_style)]], colWidths=[504])
-            w_table.setStyle(TableStyle([
-                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#fffbeb")),
-                ("BOX", (0, 0), (-1, -1), 1, colors.HexColor("#f59e0b")),
-                ("TOPPADDING", (0, 0), (-1, -1), 5),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-            ]))
-            story.append(w_table)
+            story.append(Paragraph("6. AI-Assisted Assessment — Synthetic Media", h2_style))
+            story.append(Paragraph("Warning: AI-assisted findings are probabilistic indicators and do not prove manipulation, identity, authorship, ownership, or criminal culpability.", warning_style))
             story.append(Spacer(1, 4))
-
             for ev_id, df in report.deepfake_findings.items():
                 if not df:
                     continue
+                story.append(Paragraph(f"Evidence {ev_id} Assessment", h3_style))
                 prob = df.get("synthetic_probability", 0.0)
                 conf = df.get("confidence", 0.0)
                 df_rows = [
                     [Paragraph("Detector / Type:", meta_label), Paragraph(f"{df.get('detector_name')} ({df.get('detector_type')})", body_style)],
-                    [Paragraph("Synthetic Probability:", meta_label), Paragraph(f"<b>{prob:.2f}</b> (0.00 to 1.00) | Confidence: <b>{conf*100:.1f}%</b>", body_style)],
+                    [Paragraph("Synthetic Probability:", meta_label), Paragraph(f"<b>{prob:.2f}</b> (0.00 to 1.00)", body_style)],
+                    [Paragraph("Confidence:", meta_label), Paragraph(f"{conf*100:.1f}%", body_style)],
                     [Paragraph("Assessment:", meta_label), Paragraph(df.get("assessment", ""), body_style)],
                 ]
                 t_df = Table(df_rows, colWidths=[120, 384])

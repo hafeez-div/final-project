@@ -13,6 +13,7 @@ from digitalshield.metadata.extractor import MetadataExtractor
 from digitalshield.fingerprinting.service import FingerprintService
 from digitalshield.detection.ela import ELADetector
 from digitalshield.detection.deepfake import DeepfakeAssessmentService
+from digitalshield.provenance.service import ProvenanceService
 from digitalshield.reporting.service import ReportingService
 from digitalshield.storage.json_store import JSONStore
 from digitalshield.security.audit import AuditLogger
@@ -32,6 +33,7 @@ class AnalysisWorker(threading.Thread):
         image_path: Path,
         msg_queue: queue.Queue,
         base_dir: Optional[Path] = None,
+        source_url: Optional[str] = None,
     ):
         super().__init__(daemon=True)
         self.case_name = case_name
@@ -40,6 +42,7 @@ class AnalysisWorker(threading.Thread):
         self.image_path = Path(image_path)
         self.msg_queue = msg_queue
         self.base_dir = base_dir
+        self.source_url = source_url.strip() if source_url and isinstance(source_url, str) else None
 
     def run(self):
         try:
@@ -57,6 +60,7 @@ class AnalysisWorker(threading.Thread):
                 name=self.case_name,
                 investigator=self.investigator,
                 description=self.description,
+                source_url=self.source_url,
             )
             self.msg_queue.put({"type": "step_done", "step": 0, "msg": f"Case created: {case.case_id}"})
 
@@ -65,8 +69,24 @@ class AnalysisWorker(threading.Thread):
             evidence = ev_mgr.import_evidence(
                 file_path=self.image_path,
                 case_id=case.case_id,
+                source_url=self.source_url,
             )
             self.msg_queue.put({"type": "step_done", "step": 1, "msg": f"Evidence preserved ({evidence.evidence_id})"})
+
+            # Optional: Record reported source URL in provenance system if supplied
+            prov_records = []
+            if self.source_url:
+                try:
+                    prov_service = ProvenanceService(self.base_dir)
+                    rec = prov_service.record_provenance(
+                        evidence_id=evidence.evidence_id,
+                        source_url=self.source_url,
+                        notes="Public source URL supplied by investigator during intake.",
+                        fetch_online=False,
+                    )
+                    prov_records.append(rec.to_dict())
+                except Exception:
+                    pass
 
             # Step 3: Extract Metadata & EXIF
             self.msg_queue.put({"type": "step_start", "step": 2, "msg": "Analyzing Technical & EXIF Metadata..."})
@@ -96,6 +116,8 @@ class AnalysisWorker(threading.Thread):
                 "fingerprints": fp_result,
                 "ela": ela_result,
                 "deepfake": df_result,
+                "provenance": prov_records,
+                "source_url": self.source_url,
             }
             self.msg_queue.put({"type": "complete", "data": payload})
 
@@ -135,4 +157,3 @@ class ReportWorker(threading.Thread):
             })
         except Exception as e:
             self.msg_queue.put({"type": "report_error", "error": str(e)})
-

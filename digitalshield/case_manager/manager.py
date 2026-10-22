@@ -25,7 +25,6 @@ class CaseManager:
         self.store = JSONStore(self.base_dir)
         self.audit_logger = AuditLogger(self.base_dir / "audit.log")
 
-
     def _generate_case_id(self) -> str:
         """Generate next sequential case ID in format DS-YYYY-XXXXXX."""
         year = datetime.now(timezone.utc).strftime("%Y")
@@ -50,7 +49,8 @@ class CaseManager:
         name: str,
         investigator: str = "Unassigned",
         description: str = "",
-        custom_case_id: Optional[str] = None
+        custom_case_id: Optional[str] = None,
+        source_url: Optional[str] = None,
     ) -> Case:
         """
         Create a new forensic case, set up local vault directory, save to storage, and log audit event.
@@ -72,11 +72,14 @@ class CaseManager:
         evidence_dir.mkdir(parents=True, exist_ok=True)
         reports_dir.mkdir(parents=True, exist_ok=True)
 
+        cleaned_url = source_url.strip() if source_url and isinstance(source_url, str) else None
+
         case = Case(
             case_id=case_id,
             name=name.strip(),
             investigator=investigator.strip() if investigator else "Unassigned",
             description=description.strip() if description else "",
+            source_url=cleaned_url,
             created_at=datetime.now(timezone.utc).isoformat(),
             status="OPEN",
             vault_path=str(vault_dir.resolve()),
@@ -87,14 +90,18 @@ class CaseManager:
         self.store.save_case(case.to_dict())
 
         # Audit log creation
+        audit_details = {
+            "case_id": case.case_id,
+            "name": case.name,
+            "investigator": case.investigator,
+            "vault_path": case.vault_path,
+        }
+        if case.source_url:
+            audit_details["source_url"] = case.source_url
+
         self.audit_logger.log_event(
             action="CASE_CREATED",
-            details={
-                "case_id": case.case_id,
-                "name": case.name,
-                "investigator": case.investigator,
-                "vault_path": case.vault_path
-            },
+            details=audit_details,
             actor=case.investigator
         )
 
@@ -118,4 +125,3 @@ class CaseManager:
         if case_data:
             case_data["evidence_count"] = case_data.get("evidence_count", 0) + 1
             self.store.save_case(case_data)
-

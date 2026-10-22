@@ -33,11 +33,11 @@ class DigitalShieldApp(tk.Tk):
 
         # Window configuration
         self.title("DigitalShield — Digital Forensic Assistant")
-        self.geometry("880x660")
-        self.minsize(800, 580)
+        self.geometry("880x720")
+        self.minsize(800, 620)
 
         # Center on screen
-        self._center_window(880, 660)
+        self._center_window(880, 720)
 
         # Apply custom theme
         apply_theme(self)
@@ -89,7 +89,14 @@ class DigitalShieldApp(tk.Tk):
 
             screen.tkraise()
 
-    def start_investigation(self, case_name: str, investigator: str, description: str, image_path: str):
+    def start_investigation(
+        self,
+        case_name: str,
+        investigator: str,
+        description: str,
+        image_path: str,
+        source_url: Optional[str] = None,
+    ):
         """Initiate background forensic analysis pipeline."""
         progress_screen = self.screens.get("progress")
         if progress_screen:
@@ -104,6 +111,7 @@ class DigitalShieldApp(tk.Tk):
             image_path=Path(image_path),
             msg_queue=self.msg_queue,
             base_dir=self.base_dir,
+            source_url=source_url,
         )
         worker.start()
         self._poll_analysis_queue()

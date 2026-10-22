@@ -9,7 +9,7 @@ import os
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 
 from digitalshield.case_manager.manager import CaseManager
 from digitalshield.evidence.models import Evidence
@@ -122,7 +122,7 @@ class EvidenceManager:
             except Exception:
                 manifest_data = []
 
-        manifest_data.append({
+        manifest_item = {
             "evidence_id": evidence_dict["evidence_id"],
             "case_id": evidence_dict["case_id"],
             "filename": evidence_dict["original_filename"],
@@ -130,7 +130,11 @@ class EvidenceManager:
             "mime_type": evidence_dict["mime_type"],
             "import_timestamp": evidence_dict["import_timestamp"],
             "sha256": evidence_dict["sha256"]
-        })
+        }
+        if evidence_dict.get("source_url"):
+            manifest_item["source_url"] = evidence_dict["source_url"]
+
+        manifest_data.append(manifest_item)
 
         # Temporarily grant write permissions if manifest file exists and is read-only
         if manifest_file.exists():
@@ -148,7 +152,12 @@ class EvidenceManager:
         except Exception:
             pass
 
-    def import_evidence(self, file_path: Path, case_id: str) -> Evidence:
+    def import_evidence(
+        self,
+        file_path: Union[str, Path],
+        case_id: str,
+        source_url: Optional[str] = None,
+    ) -> Evidence:
         """
         Ingest a file into a case evidence vault with read-only protection, SHA-256 calculation, and audit logging.
         """
@@ -199,6 +208,8 @@ class EvidenceManager:
         except Exception:
             pass
 
+        cleaned_url = source_url.strip() if source_url and isinstance(source_url, str) else None
+
         # 9. Create Evidence model
         evidence = Evidence(
             evidence_id=evidence_id,
@@ -208,6 +219,7 @@ class EvidenceManager:
             stored_path=str(preserved_path.resolve()),
             file_size=file_size,
             mime_type=mime_type,
+            source_url=cleaned_url,
             import_timestamp=datetime.now(timezone.utc).isoformat(),
             sha256=sha256_hash,
             status="PRESERVED"
@@ -221,23 +233,28 @@ class EvidenceManager:
         self._update_vault_manifest(vault_evidence_dir, evidence.to_dict())
 
         # 12. Log audit events
+        audit_details = {
+            "evidence_id": evidence.evidence_id,
+            "case_id": evidence.case_id,
+            "original_filename": evidence.original_filename,
+            "stored_filename": evidence.stored_filename,
+            "file_size": evidence.file_size,
+            "mime_type": evidence.mime_type,
+            "sha256": evidence.sha256
+        }
+        if evidence.source_url:
+            audit_details["source_url"] = evidence.source_url
+
         self.audit_logger.log_event(
             action="EVIDENCE_IMPORTED",
-            details={
-                "evidence_id": evidence.evidence_id,
-                "case_id": evidence.case_id,
-                "original_filename": evidence.original_filename,
-                "stored_filename": evidence.stored_filename,
-                "file_size": evidence.file_size,
-                "mime_type": evidence.mime_type,
-                "sha256": evidence.sha256
-            },
+            details=audit_details,
             actor=case_obj.investigator
         )
 
         self.audit_logger.log_event(
             action="SHA256_GENERATED",
             details={
+                "case_id": evidence.case_id,
                 "evidence_id": evidence.evidence_id,
                 "sha256": evidence.sha256,
                 "chunk_size_bytes": CHUNK_SIZE

@@ -76,7 +76,8 @@ class ProvenanceService:
         observed_account_name: Optional[str] = None,
         media_url: Optional[str] = None,
         source_timestamp: Optional[str] = None,
-        notes: Optional[str] = None
+        notes: Optional[str] = None,
+        fetch_online: bool = True,
     ) -> ProvenanceRecord:
         """
         Record a public URL provenance observation and optionally verify media similarity
@@ -96,84 +97,90 @@ class ProvenanceService:
         source_status = "ACCESSIBLE"
         fetched_content: bytes = b""
         content_type: str = ""
-
-        # Fetch public source page
-        try:
-            status_code, headers, fetched_content = self.client.fetch_public_url(validated_source_url)
-            content_type = headers.get("content-type", "")
-            if status_code >= 400:
-                source_status = f"INACCESSIBLE (HTTP {status_code})"
-            else:
-                meta = self.client.extract_public_metadata(fetched_content, content_type)
-                source_title = meta.get("source_title")
-        except Exception as e:
-            source_status = f"INACCESSIBLE ({e})"
-
         similarity_score: Optional[float] = None
         matching_method: Optional[str] = None
 
-        # Check if media comparison is requested or available
-        target_media_url = media_url
-        if not target_media_url and content_type.startswith("image/"):
-            target_media_url = validated_source_url
-
-        if target_media_url:
-            val_media_url = self.client.validate_url(target_media_url)
+        if fetch_online:
+            # Fetch public source page
             try:
-                if val_media_url == validated_source_url and fetched_content and content_type.startswith("image/"):
-                    media_bytes = fetched_content
+                status_code, headers, fetched_content = self.client.fetch_public_url(validated_source_url)
+                content_type = headers.get("content-type", "")
+                if status_code >= 400:
+                    source_status = f"INACCESSIBLE (HTTP {status_code})"
                 else:
-                    m_status, m_headers, media_bytes = self.client.fetch_public_url(val_media_url)
-                    if m_status >= 400:
-                        media_bytes = b""
+                    meta = self.client.extract_public_metadata(fetched_content, content_type)
+                    source_title = meta.get("source_title")
+            except Exception as e:
+                source_status = f"INACCESSIBLE ({e})"
 
-                if media_bytes:
-                    # Open downloaded media buffer with Pillow
-                    with Image.open(io.BytesIO(media_bytes)) as pub_img:
-                        pub_ahash = str(imagehash.average_hash(pub_img))
-                        pub_dhash = str(imagehash.dhash(pub_img))
-                        pub_phash = str(imagehash.phash(pub_img))
+            # Check if media comparison is requested or available
+            target_media_url = media_url
+            if not target_media_url and content_type.startswith("image/"):
+                target_media_url = validated_source_url
 
-                        # Retrieve registered evidence perceptual fingerprints using EXISTING FingerprintService
-                        ev_fp = self.fingerprint_service.generate_fingerprints(evidence_id)
+            if target_media_url:
+                val_media_url = self.client.validate_url(target_media_url)
+                try:
+                    if val_media_url == validated_source_url and fetched_content and content_type.startswith("image/"):
+                        media_bytes = fetched_content
+                    else:
+                        m_status, m_headers, media_bytes = self.client.fetch_public_url(val_media_url)
+                        if m_status >= 400:
+                            media_bytes = b""
 
-                        dist_a = FingerprintService.calculate_hamming_distance(pub_ahash, ev_fp.ahash)
-                        dist_d = FingerprintService.calculate_hamming_distance(pub_dhash, ev_fp.dhash)
-                        dist_p = FingerprintService.calculate_hamming_distance(pub_phash, ev_fp.phash)
+                    if media_bytes:
+                        # Open downloaded media buffer with Pillow
+                        with Image.open(io.BytesIO(media_bytes)) as pub_img:
+                            pub_ahash = str(imagehash.average_hash(pub_img))
+                            pub_dhash = str(imagehash.dhash(pub_img))
+                            pub_phash = str(imagehash.phash(pub_img))
 
-                        sim_a = FingerprintService.calculate_normalized_similarity(dist_a, bit_length=64)
-                        sim_d = FingerprintService.calculate_normalized_similarity(dist_d, bit_length=64)
-                        sim_p = FingerprintService.calculate_normalized_similarity(dist_p, bit_length=64)
+                            # Retrieve registered evidence perceptual fingerprints using EXISTING FingerprintService
+                            ev_fp = self.fingerprint_service.generate_fingerprints(evidence_id)
 
-                        overall_sim = round((sim_a + sim_d + sim_p) / 3.0, 4)
+                            dist_a = FingerprintService.calculate_hamming_distance(pub_ahash, ev_fp.ahash)
+                            dist_d = FingerprintService.calculate_hamming_distance(pub_dhash, ev_fp.dhash)
+                            dist_p = FingerprintService.calculate_hamming_distance(pub_phash, ev_fp.phash)
 
-                        similarity_score = overall_sim
-                        matching_method = "pHash + aHash + dHash"
+                            sim_a = FingerprintService.calculate_normalized_similarity(dist_a, bit_length=64)
+                            sim_d = FingerprintService.calculate_normalized_similarity(dist_d, bit_length=64)
+                            sim_p = FingerprintService.calculate_normalized_similarity(dist_p, bit_length=64)
 
-            except Exception as ex:
-                notes = f"{notes or ''} [Media retrieval notice: {ex}]".strip()
+                            overall_sim = round((sim_a + sim_d + sim_p) / 3.0, 4)
 
-        # Generate neutral probabilistic assessment phrasing
-        if similarity_score is not None:
-            if similarity_score >= 0.90:
-                assessment = (
-                    f"High visual similarity was observed between the registered evidence and the publicly accessible media "
-                    f"(similarity score: {similarity_score:.4f}; {matching_method})."
-                )
-            elif similarity_score >= 0.70:
-                assessment = (
-                    f"Moderate visual similarity was observed between the registered evidence and the publicly accessible media "
-                    f"(similarity score: {similarity_score:.4f}; {matching_method})."
-                )
+                            similarity_score = overall_sim
+                            matching_method = "pHash + aHash + dHash"
+
+                except Exception as ex:
+                    notes = f"{notes or ''} [Media retrieval notice: {ex}]".strip()
+
+            # Generate neutral probabilistic assessment phrasing
+            if similarity_score is not None:
+                if similarity_score >= 0.90:
+                    assessment = (
+                        f"High visual similarity was observed between the registered evidence and the publicly accessible media "
+                        f"(similarity score: {similarity_score:.4f}; {matching_method})."
+                    )
+                elif similarity_score >= 0.70:
+                    assessment = (
+                        f"Moderate visual similarity was observed between the registered evidence and the publicly accessible media "
+                        f"(similarity score: {similarity_score:.4f}; {matching_method})."
+                    )
+                else:
+                    assessment = (
+                        f"Low visual similarity was observed between the registered evidence and the publicly accessible media "
+                        f"(similarity score: {similarity_score:.4f}; {matching_method})."
+                    )
             else:
                 assessment = (
-                    f"Low visual similarity was observed between the registered evidence and the publicly accessible media "
-                    f"(similarity score: {similarity_score:.4f}; {matching_method})."
+                    "Publicly observed source recorded (investigative lead; evidence-supported association)."
                 )
         else:
-            assessment = (
-                "Publicly observed source recorded (investigative lead; evidence-supported association)."
-            )
+            # Merely recording investigator-supplied URL without unsolicited network access
+            target_media_url = media_url
+            source_status = "Not independently verified"
+            notes = notes or "Public source URL supplied by investigator during intake."
+            assessment = "Public source URL supplied by investigator recorded for investigative correlation. Not independently verified."
 
         limitations = [
             "Public-source observation does not establish ownership, authorship, or criminal responsibility.",
@@ -215,16 +222,22 @@ class ProvenanceService:
             json.dump(record.to_dict(), f, indent=2)
 
         # 3. Log audit event: PROVENANCE_SOURCE_RECORDED
+        audit_details = {
+            "provenance_id": prov_id,
+            "evidence_id": evidence.evidence_id,
+            "case_id": evidence.case_id,
+            "source_url": validated_source_url,
+            "domain": domain,
+            "observed_account": observed_account_name,
+            "source_status": source_status,
+        }
+        if not fetch_online:
+            audit_details["source_information"] = "URL supplied by the investigator"
+            audit_details["verification_status"] = "Not independently verified"
+
         self.audit_logger.log_event(
             action="PROVENANCE_SOURCE_RECORDED",
-            details={
-                "provenance_id": prov_id,
-                "evidence_id": evidence.evidence_id,
-                "case_id": evidence.case_id,
-                "source_url": validated_source_url,
-                "domain": domain,
-                "observed_account": observed_account_name,
-            },
+            details=audit_details,
             actor="DigitalShield Provenance Engine"
         )
 

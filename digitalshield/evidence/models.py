@@ -18,6 +18,7 @@ class Evidence(BaseModel):
     stored_path: str = Field(description="Absolute path to preserved read-only file copy")
     file_size: int = Field(description="File size in bytes")
     mime_type: str = Field(description="Inferred MIME type (e.g. image/jpeg, text/plain)")
+    source_url: Optional[str] = Field(default=None, description="Optional public source URL where evidence was observed")
     import_timestamp: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat(),
         description="ISO 8601 import timestamp in UTC"

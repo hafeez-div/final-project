@@ -109,12 +109,14 @@ class DetailsScreen(ttk.Frame):
             inv = _get_val(case, "investigator", "Not available")
             status = _get_val(case, "status", "Not available")
             cat = _get_val(case, "created_at", "Not available")
+            s_url = _get_val(case, "source_url") or (_get_val(ev, "source_url") if ev else None) or data.get("source_url")
 
             t1.insert("end", f"Case ID:             {cid}\n")
             t1.insert("end", f"Case Name:           {cname}\n")
             t1.insert("end", f"Investigator:        {inv}\n")
             t1.insert("end", f"Status:              {status}\n")
-            t1.insert("end", f"Created At (UTC):    {cat}\n\n")
+            t1.insert("end", f"Created At (UTC):    {cat}\n")
+            t1.insert("end", f"Reported Source URL: {s_url or 'None provided'}\n\n")
         else:
             t1.insert("end", "Case details:        Not available\n\n")
 
@@ -183,10 +185,9 @@ class DetailsScreen(ttk.Frame):
             t3.insert("end", f"aHash (Average):     {ah}\n")
             t3.insert("end", f"dHash (Difference):  {dh}\n")
             t3.insert("end", f"pHash (Perceptual):  {ph}\n\n")
-            t3.insert("end", "Perceptual hashes remain invariant under slight resizing and compression changes.\n")
-            t3.insert("end", "Disclaimer: Perceptual similarity is an investigative indicator and does not prove ownership or authorship.\n")
+            t3.insert("end", "> Note: Perceptual similarity measures visual structural resemblance and does not establish original authorship or identity.\n")
         else:
-            t3.insert("end", "No fingerprint record available.\n")
+            t3.insert("end", "No perceptual hash record available.\n")
         t3.config(state="disabled")
 
         # 4. ELA Tab
@@ -195,27 +196,22 @@ class DetailsScreen(ttk.Frame):
         t4.delete("1.0", "end")
         t4.insert("end", "=== ERROR LEVEL ANALYSIS (ELA) ===\n\n")
         if ela:
-            qual = _get_val(ela, "recompression_quality", 90)
             mean_e = _get_val(ela, "mean_error", 0.0)
             max_e = _get_val(ela, "max_error", 0.0)
-            stats = _get_val(ela, "statistics", {})
-            stddev_e = _get_val(stats, "stddev_error", 0.0)
-            high_px = _get_val(stats, "high_error_pixels", 0)
-            high_ratio = _get_val(stats, "high_error_ratio", 0.0)
             score = _get_val(ela, "anomaly_score", 0.0)
             conf = _get_val(ela, "confidence", 0.0)
             assess = _get_val(ela, "assessment", "Not available")
-            disclaimer = _get_val(ela, "disclaimer", "Not available")
+            stats = _get_val(ela, "statistics", {}) or {}
 
-            t4.insert("end", f"Recompression Level: {qual}%\n")
-            t4.insert("end", f"Mean Error Level:    {mean_e:.4f}\n")
-            t4.insert("end", f"Maximum Error Level: {max_e:.4f}\n")
-            t4.insert("end", f"Standard Deviation:  {stddev_e:.4f}\n")
-            t4.insert("end", f"High Error Pixels:   {high_px:,} ({high_ratio*100:.2f}%)\n")
+            t4.insert("end", f"Mean ELA Error:      {mean_e:.4f}\n")
+            t4.insert("end", f"Max ELA Error:       {max_e:.4f}\n")
             t4.insert("end", f"Anomaly Score:       {score:.4f}\n")
-            t4.insert("end", f"Confidence:          {conf*100:.1f}%\n\n")
-            t4.insert("end", f"Assessment:\n{assess}\n\n")
-            t4.insert("end", f"Limitations & Disclaimer:\n{disclaimer}\n")
+            t4.insert("end", f"Confidence:          {conf*100:.1f}%\n")
+            high_px = _get_val(stats, "high_error_pixels", 0)
+            high_ratio = _get_val(stats, "high_error_ratio", 0.0)
+            t4.insert("end", f"High Error Pixels:   {high_px:,} ({high_ratio*100:.2f}%)\n\n")
+            t4.insert("end", f"Assessment Summary:\n{assess}\n\n")
+            t4.insert("end", f"> Disclaimer: {_get_val(ela, 'disclaimer', 'Probabilistic derived forensic indicator.')}\n")
         else:
             t4.insert("end", "No ELA record available.\n")
         t4.config(state="disabled")

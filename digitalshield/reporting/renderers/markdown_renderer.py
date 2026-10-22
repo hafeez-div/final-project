@@ -52,6 +52,29 @@ class MarkdownRenderer:
         lines.append("---")
         lines.append("")
 
+        # --- Reported Public Source URL ---
+        lines.append("## Reported Public Source URL")
+        lines.append("")
+        if report.reported_source_url:
+            lines.append(f"Reported Public Source URL:  \n`{report.reported_source_url}`")
+            lines.append("")
+            lines.append("Source information: URL supplied by the investigator.")
+            lines.append("")
+            lines.append(f"Verification status: {report.reported_source_url_status or 'Not independently verified.'}")
+            lines.append("")
+            lines.append(f"Recorded Timestamp (UTC): `{report.reported_source_url_recorded_at or 'Not recorded'}`  ")
+            lines.append(f"Associated Case ID: `{meta.case_id}`  ")
+            if report.reported_source_url_evidence_id:
+                lines.append(f"Associated Evidence ID: `{report.reported_source_url_evidence_id}`  ")
+            lines.append("")
+            lines.append("> [!NOTE]")
+            lines.append("> **Source Clarification:** This public source URL was supplied by the investigator as the location where the suspected media was observed. DigitalShield records this observation as an investigative lead; it does not claim to search the entire internet, nor does recording this URL prove that the image at this location is identical to the preserved evidence or prove who uploaded or created the content.")
+        else:
+            lines.append("No public source URL was provided by the investigator.")
+        lines.append("")
+        lines.append("---")
+        lines.append("")
+
         # --- Evidence Inventory ---
         lines.append("## 2. Evidence Inventory & Cryptographic Baseline")
         lines.append("")
@@ -88,64 +111,57 @@ class MarkdownRenderer:
                     continue
                 
                 exif_status = "Metadata present" if m.get("exif_present") else "Metadata unavailable / Not recorded"
-                lines.append(f"**Status:** {exif_status}  ")
-                lines.append(f"**Extraction Timestamp:** {m.get('extraction_timestamp') or 'Not recorded'}  ")
+                lines.append(f"**EXIF Status:** {exif_status}  ")
                 lines.append("")
-                lines.append("| Category | Field | Value |")
+                lines.append("| Metadata Category | Attribute | Extracted Value |")
                 lines.append("| :--- | :--- | :--- |")
-                lines.append(f"| **Technical** | File Format | {m.get('file_format') or 'Not recorded'} |")
-                lines.append(f"| **Technical** | Dimensions | {m.get('width_px') or 'Unknown'} x {m.get('height_px') or 'Unknown'} px ({m.get('color_mode') or 'Unknown'}) |")
-                lines.append(f"| **Technical** | MIME Type | {m.get('mime_type') or 'Not recorded'} |")
+                lines.append(f"| **Technical** | File Format | {m.get('file_format') or 'Unknown'} |")
+                lines.append(f"| **Technical** | Dimensions | {m.get('width_px')} x {m.get('height_px')} px |")
+                lines.append(f"| **Technical** | Color Mode | {m.get('color_mode') or 'Unknown'} |")
                 lines.append(f"| **Device EXIF** | Camera Make | {m.get('camera_make') or 'Not recorded'} |")
                 lines.append(f"| **Device EXIF** | Camera Model | {m.get('camera_model') or 'Not recorded'} |")
-                lines.append(f"| **Device EXIF** | Software | {m.get('software') or 'Not recorded'} |")
-                lines.append(f"| **Timestamps** | Original Capture | {m.get('datetime_original') or 'Not recorded'} |")
-                lines.append(f"| **Timestamps** | Digitized | {m.get('datetime_digitized') or 'Not recorded'} |")
-                lines.append(f"| **Timestamps** | Modified | {m.get('datetime_modified') or 'Not recorded'} |")
-                lines.append(f"| **Settings** | Exposure Time | {m.get('exposure_time') or 'Not recorded'} |")
-                lines.append(f"| **Settings** | F-Number | {m.get('f_number') or 'Not recorded'} |")
-                lines.append(f"| **Settings** | ISO Speed | {m.get('iso_speed') or 'Not recorded'} |")
-                lines.append(f"| **Settings** | Focal Length | {m.get('focal_length') or 'Not recorded'} |")
-                lines.append(f"| **Settings** | Flash | {m.get('flash') or 'Not recorded'} |")
-                lines.append(f"| **Geolocation** | Latitude | {m.get('gps_latitude') or 'Not recorded'} |")
-                lines.append(f"| **Geolocation** | Longitude | {m.get('gps_longitude') or 'Not recorded'} |")
-                lines.append(f"| **Geolocation** | Altitude | {m.get('gps_altitude') or 'Not recorded'} |")
+                lines.append(f"| **Device EXIF** | Software / Firmware | {m.get('software') or 'Not recorded'} |")
+                lines.append(f"| **Device EXIF** | Original Capture Timestamp | {m.get('datetime_original') or 'Not recorded in EXIF'} |")
+                lines.append(f"| **Capture Settings** | Exposure Time | {m.get('exposure_time') or 'Not recorded'} |")
+                lines.append(f"| **Capture Settings** | F-Number | {m.get('f_number') or 'Not recorded'} |")
+                lines.append(f"| **Capture Settings** | ISO Speed Ratings | {m.get('iso_speed') or 'Not recorded'} |")
+                lines.append(f"| **Capture Settings** | Focal Length | {m.get('focal_length') or 'Not recorded'} |")
                 lines.append("")
-                lines.append("> *Note: Absence of EXIF metadata is standard across messaging applications and social media platforms and does not indicate or prove manipulation.*")
+                lines.append("> **Note on Absent EXIF:** The absence of EXIF metadata is standard across major messaging platforms, web browsers, and social networks that strip metadata during upload. The lack of metadata does not indicate malicious manipulation.")
                 lines.append("")
 
         lines.append("---")
         lines.append("")
 
-        # --- Perceptual Hash Analysis ---
-        lines.append("## 4. Perceptual Hashing & Similarity Matching")
+        # --- Perceptual Hashes ---
+        lines.append("## 4. Perceptual Hashing & Media Fingerprints")
         lines.append("")
-        lines.append("Perceptual hashes provide standard 64-bit structural fingerprints (aHash, dHash, pHash) invariant to minor compression and resolution changes. Perceptual similarity is an investigative indicator and does not prove identical origin, authorship, or ownership.")
+        lines.append("Perceptual hashes provide a normalized mathematical fingerprint of visual content structure to identify duplicate, resized, or compressed copies. Perceptual similarity measures structural similarity and does not establish original authorship or identity.")
         lines.append("")
         if not report.fingerprint_findings:
-            lines.append("*No perceptual fingerprint records found for registered evidence.*")
+            lines.append("*No perceptual fingerprint baselines calculated for registered evidence.*")
             lines.append("")
         else:
-            lines.append("| Evidence ID | Filename | aHash (Average) | dHash (Difference) | pHash (Perceptual) |")
+            lines.append("| Evidence ID | Average Hash (aHash) | Difference Hash (dHash) | Perceptual Hash (pHash) | Generated (UTC) |")
             lines.append("| :--- | :--- | :--- | :--- | :--- |")
             for ev_id, fp in report.fingerprint_findings.items():
-                if fp:
-                    lines.append(
-                        f"| `{ev_id}` | `{fp.get('original_filename') or 'Unknown'}` | "
-                        f"`{fp.get('ahash') or 'N/A'}` | `{fp.get('dhash') or 'N/A'}` | `{fp.get('phash') or 'N/A'}` |"
-                    )
+                if not fp:
+                    continue
+                lines.append(
+                    f"| `{ev_id}` | `{fp.get('ahash')}` | `{fp.get('dhash')}` | `{fp.get('phash')}` | `{fp.get('generation_timestamp')}` |"
+                )
             lines.append("")
 
         lines.append("---")
         lines.append("")
 
         # --- Error Level Analysis (ELA) ---
-        lines.append("## 5. Error Level Analysis (ELA) — Image Manipulation Findings")
+        lines.append("## 5. Error Level Analysis (ELA) Findings")
         lines.append("")
-        lines.append("Error Level Analysis examines JPEG compression artifact uniformity. ELA is a probabilistic derived forensic indicator and cannot independently prove forgery, tampering, or manipulation.")
+        lines.append("Error Level Analysis (ELA) examines compression rate variance across an image by comparing against a uniform JPEG recompression baseline. Unusually high error regions may highlight potential local edits or composite anomalies.")
         lines.append("")
         if not report.ela_findings:
-            lines.append("*No ELA manipulation analysis records found for registered evidence.*")
+            lines.append("*No Error Level Analysis (ELA) records found for registered evidence.*")
             lines.append("")
         else:
             for ev_id, ela in report.ela_findings.items():
@@ -281,47 +297,42 @@ class MarkdownRenderer:
                     lines.append("")
                     continue
 
-                lines.append("| Event Type | Timestamp (UTC) | Source / Reference | Details / Description |")
+                lines.append("| Event Type | Timestamp (UTC) | Source / Location | Description / Details |")
                 lines.append("| :--- | :--- | :--- | :--- |")
                 for ev in events:
-                    ts = ev.get("timestamp") or "Unknown / Not available"
                     lines.append(
-                        f"| `{ev.get('event_type')}` | `{ts}` | "
-                        f"{ev.get('source') or 'Local Vault'} | {ev.get('description') or ''} |"
+                        f"| `{ev.get('event_type')}` | `{ev.get('timestamp')}` | {ev.get('source')} | {ev.get('description')} |"
                     )
-                lines.append("")
-                lines.append(f"> *Disclaimer: {tl.get('disclaimer') or 'Timestamps reflect evidence import and public observation records.'}*")
                 lines.append("")
 
         lines.append("---")
         lines.append("")
 
-        # --- Audit & Chain of Custody Summary ---
-        lines.append("## 9. Audit Trail & Chain of Custody Summary")
+        # --- Audit Trail Summary ---
+        lines.append("## 9. Cryptographic Audit Trail & Chain of Custody")
         lines.append("")
-        lines.append("Append-only tamper-evident audit operations recorded in cryptographic chain of custody for this case.")
+        lines.append("Chronological chain of custody and forensic operations recorded in the local append-only SHA-256 audit log.")
         lines.append("")
         if not report.audit_events:
             lines.append("*No case-specific audit events recorded in audit log.*")
             lines.append("")
         else:
-            lines.append("| Timestamp (UTC) | Action | Actor | Target / Summary | Entry Hash (SHA-256) |")
+            lines.append("| Sequence / UTC Timestamp | Action Performed | Actor | Summary Target | Entry Hash (SHA-256) |")
             lines.append("| :--- | :--- | :--- | :--- | :--- |")
-            for a in report.audit_events[-20:]:  # Last 20 relevant events
+            for a in report.audit_events[-20:]:  # Display up to 20 most recent relevant events
                 details = a.get("details", {})
-                target = details.get("evidence_id") or details.get("provenance_id") or details.get("case_id") or "Case Entity"
-                hash_short = a.get("entry_hash", "")[:16] + "..." if a.get("entry_hash") else "N/A"
+                target = details.get("evidence_id") or details.get("provenance_id") or details.get("case_id") or "Case"
+                h_str = f"`{a.get('entry_hash', '')[:16]}...`" if a.get("entry_hash") else "N/A"
                 lines.append(
-                    f"| `{a.get('timestamp', '')[:19]}` | `{a.get('action')}` | {a.get('actor', 'System')} | "
-                    f"{target} | `{hash_short}` |"
+                    f"| `{a.get('timestamp')}` | `{a.get('action')}` | {a.get('actor') or 'System'} | `{target}` | {h_str} |"
                 )
             lines.append("")
 
         lines.append("---")
         lines.append("")
 
-        # --- Overall Findings ---
-        lines.append("## 10. Summary of Objective Findings")
+        # --- Objective Findings Summary ---
+        lines.append("## 10. Summary of Objective Technical Findings")
         lines.append("")
         if report.overall_findings:
             for item in report.overall_findings:

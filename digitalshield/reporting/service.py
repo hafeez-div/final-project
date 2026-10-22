@@ -97,6 +97,7 @@ class ReportingService:
             name=case.name,
             investigator=case.investigator,
             description=case.description,
+            source_url=getattr(case, "source_url", None),
             created_at=case.created_at,
             status=case.status,
             vault_path=case.vault_path,
@@ -121,6 +122,7 @@ class ReportingService:
                 stored_path=ev.stored_path,
                 file_size=ev.file_size,
                 mime_type=ev.mime_type,
+                source_url=getattr(ev, "source_url", None),
                 import_timestamp=ev.import_timestamp,
                 sha256=ev.sha256,
                 status=ev.status,
@@ -157,10 +159,37 @@ class ReportingService:
         # 5. Audit Events
         audit_events = self.audit_logger.get_events_by_case(case_id)
 
-        # 6. Overall Findings Synthesis
+        # 6. Resolve Reported Public Source URL (supplied by investigator)
+        rep_url = getattr(case, "source_url", None)
+        rep_rec_at = case.created_at if rep_url else None
+        rep_status = "Not independently verified." if rep_url else None
+        rep_ev_id = evidence_items[0].evidence_id if evidence_items else None
+
+        if not rep_url and evidence_items:
+            for ei in evidence_items:
+                if getattr(ei, "source_url", None):
+                    rep_url = ei.source_url
+                    rep_rec_at = ei.import_timestamp
+                    rep_status = "Not independently verified."
+                    rep_ev_id = ei.evidence_id
+                    break
+
+        if not rep_url and prov_records:
+            for pr in prov_records:
+                if pr.get("source_url"):
+                    rep_url = pr.get("source_url")
+                    rep_rec_at = pr.get("discovery_timestamp") or case.created_at
+                    raw_st = pr.get("source_status") or "Not independently verified."
+                    rep_status = raw_st if raw_st.endswith(".") else f"{raw_st}."
+                    rep_ev_id = pr.get("evidence_id") or rep_ev_id
+                    break
+
+        # 7. Overall Findings Synthesis
         overall_findings = []
         overall_findings.append(f"{len(evidence_items)} digital evidence item(s) preserved in read-only forensic vault with SHA-256 baseline verification.")
         
+        if rep_url:
+            overall_findings.append(f"Public webpage source URL recorded as reported by investigator: {rep_url} (Verification status: {rep_status or 'Not independently verified'}).")
         if metadata_findings:
             overall_findings.append(f"Technical metadata/EXIF parsed for {len(metadata_findings)} evidence item(s).")
         if fingerprint_findings:
@@ -172,7 +201,7 @@ class ReportingService:
         if prov_records:
             overall_findings.append(f"{len(prov_records)} public URL provenance observation(s) recorded for investigative correlation.")
 
-        # 7. Standard Forensic Limitations
+        # 8. Standard Forensic Limitations
         limitations = [
             "Digital evidence items are preserved in read-only vaults; SHA-256 digests represent the baseline state upon ingestion.",
             "The absence of EXIF metadata is standard across social media and messaging platforms and does not prove tampering.",
@@ -197,6 +226,10 @@ class ReportingService:
             overall_findings=overall_findings,
             limitations=limitations,
             investigator_notes=case.description if case.description else None,
+            reported_source_url=rep_url,
+            reported_source_url_recorded_at=rep_rec_at,
+            reported_source_url_status=rep_status,
+            reported_source_url_evidence_id=rep_ev_id,
         )
 
     def generate_report(
@@ -255,6 +288,9 @@ class ReportingService:
                 PDFRenderer.render(report_data, pdf_path)
                 output_paths["pdf"] = pdf_path
                 files_map["pdf"] = str(pdf_path)
+
+            else:
+                pass
 
         record = ReportRecord(
             report_id=report_id,

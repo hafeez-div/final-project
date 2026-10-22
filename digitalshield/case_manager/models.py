@@ -15,6 +15,7 @@ class Case(BaseModel):
     name: str = Field(description="Human-readable case name")
     investigator: str = Field(default="Unassigned", description="Name or email of investigator")
     description: str = Field(default="", description="Case description or notes")
+    source_url: Optional[str] = Field(default=None, description="Reported public source URL supplied by investigator")
     created_at: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat(),
         description="ISO 8601 creation timestamp in UTC"
@@ -31,5 +32,3 @@ class Case(BaseModel):
     def from_dict(cls, data: dict) -> "Case":
         """Construct Case instance from dictionary."""
         return cls(**data)
-
-

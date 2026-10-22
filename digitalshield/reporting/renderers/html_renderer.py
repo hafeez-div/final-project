@@ -211,11 +211,33 @@ class HTMLRenderer:
             "</div>",
             "</div>",
 
-            # --- Evidence Inventory ---
+            # --- Reported Public Source URL ---
             "<div class='section'>",
-            "<h2>2. Evidence Inventory & Cryptographic Baseline</h2>",
-            "<p>All SHA-256 hash digests represent the preserved, read-only evidence copies held in local vaults.</p>",
+            "<h2>Reported Public Source URL</h2>",
         ]
+
+        if report.reported_source_url:
+            doc.append("<table>")
+            doc.append("<tr><th style='width:25%'>Attribute</th><th>Details</th></tr>")
+            doc.append(f"<tr><td><strong>Reported Public Source URL</strong></td><td><code>{esc(report.reported_source_url)}</code></td></tr>")
+            doc.append("<tr><td><strong>Source Information</strong></td><td>URL supplied by the investigator.</td></tr>")
+            doc.append(f"<tr><td><strong>Verification Status</strong></td><td><span class='badge'>{esc(report.reported_source_url_status or 'Not independently verified.')}</span></td></tr>")
+            doc.append(f"<tr><td><strong>Recorded Timestamp (UTC)</strong></td><td><code>{esc(report.reported_source_url_recorded_at or 'Not recorded')}</code></td></tr>")
+            doc.append(f"<tr><td><strong>Associated Case ID</strong></td><td><code>{esc(meta.case_id)}</code></td></tr>")
+            doc.append(f"<tr><td><strong>Associated Evidence ID</strong></td><td><code>{esc(report.reported_source_url_evidence_id or 'Not assigned')}</code></td></tr>")
+            doc.append("</table>")
+            doc.append("<div class='callout'>")
+            doc.append("<strong>Source Clarification:</strong> This public source URL was supplied by the investigator as the location where the suspected media was observed. Recording this URL does not constitute proof of authorship, ownership, or identity of the person who uploaded or created the media.")
+            doc.append("</div>")
+        else:
+            doc.append("<p class='dim'>No public source URL was provided by the investigator.</p>")
+
+        doc.append("</div>")
+
+        # --- Evidence Inventory ---
+        doc.append("<div class='section'>")
+        doc.append("<h2>2. Evidence Inventory & Cryptographic Baseline</h2>")
+        doc.append("<p>All SHA-256 hash digests represent the preserved, read-only evidence copies held in local vaults.</p>")
 
         if not report.evidence_items:
             doc.append("<p class='dim'>No evidence items registered in this case.</p>")
@@ -248,65 +270,61 @@ class HTMLRenderer:
                 doc.append(f"<tr><td>Technical</td><td>Dimensions</td><td>{esc(m.get('width_px'))} x {esc(m.get('height_px'))} px ({esc(m.get('color_mode'))})</td></tr>")
                 doc.append(f"<tr><td>Device EXIF</td><td>Camera Make / Model</td><td>{esc(m.get('camera_make'))} {esc(m.get('camera_model'))}</td></tr>")
                 doc.append(f"<tr><td>Device EXIF</td><td>Software</td><td>{esc(m.get('software'))}</td></tr>")
-                doc.append(f"<tr><td>Timestamps</td><td>Original Capture</td><td>{esc(m.get('datetime_original'))}</td></tr>")
-                doc.append(f"<tr><td>Timestamps</td><td>Digitized / Modified</td><td>{esc(m.get('datetime_digitized'))} / {esc(m.get('datetime_modified'))}</td></tr>")
-                doc.append(f"<tr><td>Settings</td><td>Exposure / Aperture</td><td>{esc(m.get('exposure_time'))} / {esc(m.get('f_number'))}</td></tr>")
-                doc.append(f"<tr><td>Settings</td><td>ISO / Focal Length</td><td>{esc(m.get('iso_speed'))} / {esc(m.get('focal_length'))}</td></tr>")
-                doc.append(f"<tr><td>Geolocation</td><td>GPS Coordinates</td><td>Lat: {esc(m.get('gps_latitude'))}, Lon: {esc(m.get('gps_longitude'))}, Alt: {esc(m.get('gps_altitude'))}</td></tr>")
+                doc.append(f"<tr><td>Device EXIF</td><td>Capture Date (UTC)</td><td>{esc(m.get('datetime_original'))}</td></tr>")
+                doc.append(f"<tr><td>Exposure Settings</td><td>Exposure / Aperture / ISO</td><td>{esc(m.get('exposure_time'))} | F/{esc(m.get('f_number'))} | ISO {esc(m.get('iso_speed'))}</td></tr>")
                 doc.append("</table>")
-                doc.append("<div class='callout'><small>Absence of EXIF metadata is standard across social media / chat platforms and does not establish manipulation.</small></div>")
+                doc.append("<div class='callout'><strong>Note on Metadata Absence:</strong> Stripped EXIF metadata is standard across major messaging platforms and web re-upload pipelines. It does not indicate malicious manipulation.</div>")
         doc.append("</div>")
 
-        # --- Perceptual Hash Analysis ---
+        # --- Perceptual Hashes ---
         doc.append("<div class='section'>")
-        doc.append("<h2>4. Perceptual Hashing & Similarity Matching</h2>")
-        doc.append("<p>Perceptual hashes provide visual similarity metrics across media assets. Similarity is an investigative indicator and does not prove identical origin, authorship, or ownership.</p>")
+        doc.append("<h2>4. Perceptual Hashing & Media Fingerprints</h2>")
+        doc.append("<p>Perceptual hashes measure visual structural similarity to identify duplicate or cropped copies across platforms.</p>")
         if not report.fingerprint_findings:
-            doc.append("<p class='dim'>No perceptual fingerprint records found for registered evidence.</p>")
+            doc.append("<p class='dim'>No perceptual hashes recorded.</p>")
         else:
             doc.append("<table>")
-            doc.append("<tr><th>Evidence ID</th><th>Filename</th><th>aHash (Average)</th><th>dHash (Difference)</th><th>pHash (Perceptual)</th></tr>")
+            doc.append("<tr><th>Evidence ID</th><th>Average Hash (aHash)</th><th>Difference Hash (dHash)</th><th>Perceptual Hash (pHash)</th></tr>")
             for ev_id, fp in report.fingerprint_findings.items():
-                if fp:
-                    doc.append(
-                        f"<tr><td><code>{esc(ev_id)}</code></td><td>{esc(fp.get('original_filename'))}</td>"
-                        f"<td><code>{esc(fp.get('ahash'))}</code></td><td><code>{esc(fp.get('dhash'))}</code></td><td><code>{esc(fp.get('phash'))}</code></td></tr>"
-                    )
+                if not fp:
+                    continue
+                doc.append(
+                    f"<tr><td><code>{esc(ev_id)}</code></td><td><code>{esc(fp.get('ahash'))}</code></td>"
+                    f"<td><code>{esc(fp.get('dhash'))}</code></td><td><code>{esc(fp.get('phash'))}</code></td></tr>"
+                )
             doc.append("</table>")
         doc.append("</div>")
 
         # --- ELA Analysis ---
         doc.append("<div class='section'>")
-        doc.append("<h2>5. Error Level Analysis (ELA) — Image Manipulation Findings</h2>")
-        doc.append("<p>Error Level Analysis examines JPEG compression artifact uniformity. ELA is a probabilistic derived forensic indicator and cannot independently prove forgery or manipulation.</p>")
+        doc.append("<h2>5. Error Level Analysis (ELA) Findings</h2>")
         if not report.ela_findings:
-            doc.append("<p class='dim'>No ELA manipulation analysis records found for registered evidence.</p>")
+            doc.append("<p class='dim'>No ELA analysis performed.</p>")
         else:
             for ev_id, ela in report.ela_findings.items():
                 doc.append(f"<h3>Evidence <code>{esc(ev_id)}</code></h3>")
                 if not ela:
-                    doc.append("<p class='dim'>ELA analysis not performed for this item.</p>")
+                    doc.append("<p class='dim'>ELA analysis not available for this item.</p>")
                     continue
                 stats = ela.get("statistics", {})
                 doc.append("<table>")
-                doc.append("<tr><th>Metric</th><th>Value</th><th>Forensic Context</th></tr>")
-                doc.append(f"<tr><td>Mean Error</td><td>{ela.get('mean_error', 0.0):.4f}</td><td>Global artifact intensity</td></tr>")
-                doc.append(f"<tr><td>Max Error</td><td>{ela.get('max_error', 0.0):.4f}</td><td>Peak local error level</td></tr>")
-                doc.append(f"<tr><td>StdDev Error</td><td>{stats.get('stddev_error', 0.0):.4f}</td><td>Error distribution variance</td></tr>")
-                doc.append(f"<tr><td>High Error Pixels</td><td>{stats.get('high_error_pixels', 0):,} ({stats.get('high_error_ratio', 0.0)*100:.2f}%)</td><td>Pixels exceeding anomaly threshold</td></tr>")
-                doc.append(f"<tr><td>Anomaly Score</td><td><strong>{ela.get('anomaly_score', 0.0):.4f}</strong></td><td>0.0 (uniform) to 1.0 (high variance)</td></tr>")
-                doc.append(f"<tr><td>Confidence</td><td>{ela.get('confidence', 0.0)*100:.1f}%</td><td>Signal quality confidence</td></tr>")
+                doc.append("<tr><th>Metric</th><th>Observed Value</th><th>Interpretation</th></tr>")
+                doc.append(f"<tr><td>JPEG Recompression Baseline</td><td>Quality {ela.get('recompression_quality', 90)}</td><td>Standard test quality</td></tr>")
+                doc.append(f"<tr><td>Mean Error Level</td><td>{ela.get('mean_error', 0.0):.4f}</td><td>Global error intensity</td></tr>")
+                doc.append(f"<tr><td>Max Error Level</td><td>{ela.get('max_error', 0.0):.4f}</td><td>Peak compression delta</td></tr>")
+                doc.append(f"<tr><td>High Error Pixels Ratio</td><td>{stats.get('high_error_ratio', 0.0)*100:.2f}%</td><td>Proportion of pixel anomalies</td></tr>")
+                doc.append(f"<tr><td>Anomaly Indicator Score</td><td><strong>{ela.get('anomaly_score', 0.0):.4f}</strong></td><td>Normalized indicator scale</td></tr>")
                 doc.append("</table>")
                 doc.append(f"<p><strong>Assessment:</strong> {esc(ela.get('assessment'))}</p>")
-                doc.append(f"<div class='callout'><small><strong>Disclaimer:</strong> {esc(ela.get('disclaimer'))}</small></div>")
+                doc.append(f"<div class='callout'><strong>Forensic Limitation:</strong> {esc(ela.get('disclaimer'))}</div>")
         doc.append("</div>")
 
-        # --- Deepfake Analysis ---
+        # --- Deepfake Assessment ---
         doc.append("<div class='section'>")
         doc.append("<h2>6. AI-Assisted Assessment — Deepfake & Synthetic Media</h2>")
-        doc.append("<div class='alert-warning'><strong>Forensic Caveat:</strong> AI-assisted findings are probabilistic indicators and should not be treated as definitive proof of manipulation, identity, authorship, ownership, or criminal responsibility.</div>")
+        doc.append("<div class='alert-warning'><strong>Forensic Caution:</strong> AI-assisted findings are probabilistic indicators and should not be treated as definitive proof of manipulation, identity, authorship, ownership, or criminal responsibility.</div>")
         if not report.deepfake_findings:
-            doc.append("<p class='dim'>No AI-assisted deepfake assessments recorded for registered evidence.</p>")
+            doc.append("<p class='dim'>No deepfake assessments performed.</p>")
         else:
             for ev_id, df in report.deepfake_findings.items():
                 doc.append(f"<h3>Evidence <code>{esc(ev_id)}</code></h3>")

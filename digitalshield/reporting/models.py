@@ -30,6 +30,7 @@ class CaseInfo(BaseModel):
     name: str = Field(description="Case title or description")
     investigator: str = Field(default="Unassigned", description="Assigned investigator")
     description: str = Field(default="", description="Case description or scope notes")
+    source_url: Optional[str] = Field(default=None, description="Reported public source URL supplied by investigator")
     created_at: str = Field(description="UTC ISO 8601 case initialization timestamp")
     status: str = Field(default="OPEN", description="Case status (OPEN, CLOSED, ARCHIVED)")
     vault_path: str = Field(description="Local vault directory path")
@@ -45,6 +46,7 @@ class EvidenceItemReport(BaseModel):
     stored_path: str = Field(description="Preserved read-only vault path")
     file_size: int = Field(description="File size in bytes")
     mime_type: str = Field(description="MIME type")
+    source_url: Optional[str] = Field(default=None, description="Reported public source URL supplied by investigator")
     import_timestamp: str = Field(description="UTC ISO 8601 ingestion timestamp")
     sha256: str = Field(description="Cryptographic SHA-256 hash digest")
     status: str = Field(default="PRESERVED", description="Preservation status")
@@ -76,6 +78,12 @@ class ReportData(BaseModel):
     overall_findings: List[str] = Field(default_factory=list)
     limitations: List[str] = Field(default_factory=list)
     investigator_notes: Optional[str] = Field(default=None)
+
+    # Reported public source URL (supplied by investigator)
+    reported_source_url: Optional[str] = Field(default=None, description="Exact public source URL entered by investigator")
+    reported_source_url_recorded_at: Optional[str] = Field(default=None, description="UTC timestamp when public source URL was recorded")
+    reported_source_url_status: Optional[str] = Field(default=None, description="Verification status of reported source URL")
+    reported_source_url_evidence_id: Optional[str] = Field(default=None, description="Associated evidence ID")
 
     def to_dict(self) -> dict:
         """Convert ReportData to dictionary."""
