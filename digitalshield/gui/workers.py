@@ -108,6 +108,19 @@ class AnalysisWorker(threading.Thread):
             df_result = df_service.assess_evidence(evidence.evidence_id)
             self.msg_queue.put({"type": "step_done", "step": 5, "msg": "Synthetic media assessment complete"})
 
+            # Step 7: Automatic Reverse Image Search & Public Web Discovery
+            self.msg_queue.put({"type": "step_start", "step": 6, "msg": "Running Automatic Reverse Image Search & Public Web Discovery..."})
+            wd_session = None
+            wd_results = []
+            try:
+                from digitalshield.web_discovery.service import WebDiscoveryService
+                wd_service = WebDiscoveryService(self.base_dir)
+                wd_session = wd_service.run_search(evidence.evidence_id)
+                wd_results = [r.to_dict() for r in wd_service.list_results_by_session(wd_session.session_id)]
+                self.msg_queue.put({"type": "step_done", "step": 6, "msg": f"Discovery complete: {len(wd_results)} source(s) found"})
+            except Exception as wde:
+                self.msg_queue.put({"type": "step_done", "step": 6, "msg": f"Web discovery note: {str(wde)[:50]}"})
+
             # Assemble complete data bundle for GUI display
             payload = {
                 "case": case,
@@ -118,6 +131,8 @@ class AnalysisWorker(threading.Thread):
                 "deepfake": df_result,
                 "provenance": prov_records,
                 "source_url": self.source_url,
+                "web_discovery_session": wd_session.to_dict() if wd_session else None,
+                "web_discovery_results": wd_results,
             }
             self.msg_queue.put({"type": "complete", "data": payload})
 
@@ -157,3 +172,44 @@ class ReportWorker(threading.Thread):
             })
         except Exception as e:
             self.msg_queue.put({"type": "report_error", "error": str(e)})
+
+
+class WebDiscoveryWorker(threading.Thread):
+    """
+    Background worker that runs Google Cloud Vision Web Detection source discovery
+    without freezing the Tkinter GUI thread.
+
+    Emits messages to msg_queue:
+      {"type": "wd_start"}
+      {"type": "wd_complete", "session": <WebDiscoverySession dict>, "results": [<WebDiscoveryResult dict>, ...]}
+      {"type": "wd_error", "error": <str>}
+
+    SECURITY: never logs or exposes the API key.
+    FORENSICS: never modifies original evidence.
+    """
+
+    def __init__(
+        self,
+        evidence_id: str,
+        msg_queue: queue.Queue,
+        base_dir: Optional[Path] = None,
+    ):
+        super().__init__(daemon=True)
+        self.evidence_id = evidence_id
+        self.msg_queue = msg_queue
+        self.base_dir = base_dir
+
+    def run(self):
+        try:
+            from digitalshield.web_discovery.service import WebDiscoveryService
+            self.msg_queue.put({"type": "wd_start"})
+            service = WebDiscoveryService(self.base_dir)
+            session = service.run_search(self.evidence_id)
+            results = service.list_results_by_session(session.discovery_id)
+            self.msg_queue.put({
+                "type": "wd_complete",
+                "session": session.to_dict(),
+                "results": [r.to_dict() for r in results],
+            })
+        except Exception as e:
+            self.msg_queue.put({"type": "wd_error", "error": str(e)})

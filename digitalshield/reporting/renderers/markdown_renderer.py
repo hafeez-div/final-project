@@ -331,8 +331,126 @@ class MarkdownRenderer:
         lines.append("---")
         lines.append("")
 
+
+        lines.append("---")
+        lines.append("")
+
+        # --- Public Online Image Discovery and Reverse Image Search Findings ---
+        lines.append("# Public Online Image Discovery and Reverse Image Search Findings")
+        lines.append("")
+        lines.append(
+            "Reverse image search results depend on the external provider's indexed and accessible content. "
+            "DigitalShield cannot guarantee discovery of every online occurrence. A missing result does not "
+            "establish that an image has never been published online. Perceptual hash similarity is an "
+            "investigative indicator and does not independently establish image identity, unauthorized "
+            "distribution, or the identity of an uploader."
+        )
+        lines.append("")
+
+        sessions = getattr(report, "web_discovery_sessions", []) or []
+        wd_results = getattr(report, "web_discovery_results", []) or []
+
+        if not sessions:
+            lines.append("*No reverse image search or public web discovery sessions have been executed for this case.*")
+            lines.append("")
+        else:
+            for sess in sessions:
+                sid = sess.get("session_id") or sess.get("discovery_id", "N/A")
+                ev_id = sess.get("evidence_id", "N/A")
+                provider = sess.get("provider", "Google Cloud Vision Web Detection")
+                status = sess.get("status", "N/A")
+                started = sess.get("started_at") or sess.get("search_timestamp", "N/A")
+                completed = sess.get("completed_at") or "N/A"
+                total = sess.get("total_results", 0) or sess.get("total_candidates", 0)
+                verified = sess.get("verified_matches", 0)
+                unverified = sess.get("unverified_results", 0)
+                failed = sess.get("failed_sources", 0)
+
+                lines.append(f"## Session {sid} — Evidence {ev_id}")
+                lines.append("")
+                lines.append("| Metric | Details |")
+                lines.append("| :--- | :--- |")
+                lines.append(f"| **Case ID** | {case.case_id} |")
+                lines.append(f"| **Evidence ID** | {ev_id} |")
+                lines.append(f"| **Search Provider** | {provider} |")
+                lines.append(f"| **Search Status** | {status} |")
+                lines.append(f"| **Initiation Timestamp (UTC)** | {started} |")
+                lines.append(f"| **Completion Timestamp (UTC)** | {completed} |")
+                lines.append(f"| **Total Candidate Webpages Discovered** | {total} |")
+                lines.append(f"| **Total Verified Media Matches** | {verified} |")
+                lines.append(f"| **Total Unverified Search Results** | {unverified} |")
+                lines.append(f"| **Failed Web Sources** | {failed} |")
+                if sess.get("error_message"):
+                    lines.append(f"| **Status Message** | {sess['error_message']} |")
+                lines.append("")
+
+                sess_results = [
+                    r for r in wd_results
+                    if r.get("session_id") == sid or r.get("discovery_id") == sid
+                ]
+
+                if not sess_results:
+                    if status == "NO_RESULTS":
+                        lines.append("*Automatic reverse search completed: No candidate sources discovered.*")
+                    elif status == "MISSING_CREDENTIALS":
+                        lines.append("*Provider unavailable: GOOGLE_CLOUD_API_KEY environment variable is not configured.*")
+                    elif status == "FAILED":
+                        lines.append(f"*Search execution failed: {sess.get('error_message', 'Provider error')}.*")
+                    else:
+                        lines.append("*No candidate sources recorded for this session.*")
+                    lines.append("")
+                else:
+                    lines.append(f"### Discovered Sources & Verification Details ({len(sess_results)})")
+                    lines.append("")
+                    for r in sess_results:
+                        rid = r.get("result_id", "N/A")
+                        platform = r.get("platform") or r.get("domain") or "Web Source"
+                        title = r.get("page_title") or "Not available"
+                        src_url = r.get("source_url", "N/A")
+                        med_url = r.get("media_url") or "Not available"
+                        mtype = r.get("provider_match_type", "N/A")
+                        prov_score = f"{r['provider_similarity']:.4f}" if r.get("provider_similarity") is not None else "N/A"
+                        calc_score = f"{r['calculated_similarity']:.4f}" if r.get("calculated_similarity") is not None else "Not calculated"
+                        ahash_d = r.get("ahash_distance", "N/A")
+                        dhash_d = r.get("dhash_distance", "N/A")
+                        phash_d = r.get("phash_distance", "N/A")
+                        vstatus = r.get("verification_status", "Awaiting investigator review")
+                        sstatus = r.get("scrape_status", "N/A")
+                        ts = r.get("discovery_timestamp") or r.get("retrieval_timestamp", "N/A")
+
+                        lines.append(f"#### {rid} — {platform} ({vstatus})")
+                        lines.append("")
+                        lines.append("| Field | Value |")
+                        lines.append("| :--- | :--- |")
+                        lines.append(f"| **Platform / Domain** | {platform} |")
+                        lines.append(f"| **Webpage Title** | {title} |")
+                        lines.append(f"| **Source Webpage URL** | [{src_url}]({src_url}) |")
+                        if med_url != "Not available":
+                            lines.append(f"| **Candidate Image URL** | [{med_url}]({med_url}) |")
+                        else:
+                            lines.append("| **Candidate Image URL** | Not available |")
+                        lines.append(f"| **Discovery Timestamp (UTC)** | {ts} |")
+                        lines.append(f"| **Provider Match Type** | {mtype} (provider-reported) |")
+                        lines.append(f"| **Provider Similarity** | {prov_score} |")
+                        lines.append(f"| **Independent Hash Similarity** | {calc_score} (pHash+aHash+dHash) |")
+                        lines.append(f"| **Hamming Distances** | aHash: {ahash_d}, dHash: {dhash_d}, pHash: {phash_d} |")
+                        lines.append(f"| **Verification Status** | {vstatus} |")
+                        lines.append(f"| **Scraping Status** | {sstatus} |")
+                        if r.get("notes"):
+                            lines.append(f"| **Investigator Notes** | {r['notes']} |")
+                        lines.append("")
+
+        lines.append(
+            "> ⚠ **Limitation Statement:** Reverse image search results depend on the external provider's indexed "
+            "and accessible content. DigitalShield cannot guarantee discovery of every online occurrence. A missing result "
+            "does not establish that an image has never been published online. Perceptual hash similarity is an "
+            "investigative indicator and does not independently establish image identity, unauthorized distribution, "
+            "or the identity of an uploader."
+        )
+        lines.append("")
+
         # --- Objective Findings Summary ---
-        lines.append("## 10. Summary of Objective Technical Findings")
+        lines.append("## 11. Summary of Objective Technical Findings")
         lines.append("")
         if report.overall_findings:
             for item in report.overall_findings:
@@ -346,7 +464,7 @@ class MarkdownRenderer:
         lines.append("")
 
         # --- Forensic Limitations ---
-        lines.append("## 11. Forensic & Legal Limitations")
+        lines.append("## 12. Forensic & Legal Limitations")
         lines.append("")
         if report.limitations:
             for lim in report.limitations:
@@ -360,7 +478,7 @@ class MarkdownRenderer:
         lines.append("")
 
         # --- Investigator Notes ---
-        lines.append("## 12. Investigator / Case Notes")
+        lines.append("## 13. Investigator / Case Notes")
         lines.append("")
         if report.investigator_notes:
             lines.append(report.investigator_notes)

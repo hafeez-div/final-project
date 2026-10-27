@@ -24,23 +24,17 @@ class JSONStore:
         self.deepfake_file = self.base_dir / "deepfake.json"
         self.provenance_file = self.base_dir / "provenance.json"
         self.reports_file = self.base_dir / "reports.json"
+        self.web_discovery_sessions_file = self.base_dir / "web_discovery_sessions.json"
+        self.web_discovery_results_file = self.base_dir / "web_discovery_results.json"
         self.base_dir.mkdir(parents=True, exist_ok=True)
-        if not self.cases_file.exists():
-            self._write_file(self.cases_file, {})
-        if not self.evidence_file.exists():
-            self._write_file(self.evidence_file, {})
-        if not self.metadata_file.exists():
-            self._write_file(self.metadata_file, {})
-        if not self.fingerprints_file.exists():
-            self._write_file(self.fingerprints_file, {})
-        if not self.ela_file.exists():
-            self._write_file(self.ela_file, {})
-        if not self.deepfake_file.exists():
-            self._write_file(self.deepfake_file, {})
-        if not self.provenance_file.exists():
-            self._write_file(self.provenance_file, {})
-        if not self.reports_file.exists():
-            self._write_file(self.reports_file, {})
+        for f in (
+            self.cases_file, self.evidence_file, self.metadata_file,
+            self.fingerprints_file, self.ela_file, self.deepfake_file,
+            self.provenance_file, self.reports_file,
+            self.web_discovery_sessions_file, self.web_discovery_results_file,
+        ):
+            if not f.exists():
+                self._write_file(f, {})
 
     def _read_file(self, target_file: Path) -> Dict[str, dict]:
         if not target_file.exists():
@@ -221,6 +215,56 @@ class JSONStore:
         data = self._read_file(self.reports_file)
         return list(data.values())
 
+    # --- Web Discovery Session Methods ---
+    def save_web_discovery_session(self, session_dict: dict) -> None:
+        """Save or update a web discovery session record."""
+        data = self._read_file(self.web_discovery_sessions_file)
+        data[session_dict["discovery_id"]] = session_dict
+        self._write_file(self.web_discovery_sessions_file, data)
 
+    def get_web_discovery_session(self, discovery_id: str) -> Optional[dict]:
+        """Retrieve a web discovery session by discovery ID."""
+        data = self._read_file(self.web_discovery_sessions_file)
+        return data.get(discovery_id)
 
+    def list_web_discovery_sessions(self) -> List[dict]:
+        """Return all stored web discovery sessions."""
+        data = self._read_file(self.web_discovery_sessions_file)
+        return list(data.values())
 
+    def list_web_discovery_sessions_by_evidence(self, evidence_id: str) -> List[dict]:
+        """Return web discovery sessions for a specific evidence item."""
+        data = self._read_file(self.web_discovery_sessions_file)
+        return [s for s in data.values() if s.get("evidence_id") == evidence_id]
+
+    def list_web_discovery_sessions_by_case(self, case_id: str) -> List[dict]:
+        """Return web discovery sessions for a specific case."""
+        data = self._read_file(self.web_discovery_sessions_file)
+        return [s for s in data.values() if s.get("case_id") == case_id]
+
+    # --- Web Discovery Result Methods ---
+    def save_web_discovery_result(self, result_dict: dict) -> None:
+        """Save or update a web discovery result record."""
+        data = self._read_file(self.web_discovery_results_file)
+        data[result_dict["result_id"]] = result_dict
+        self._write_file(self.web_discovery_results_file, data)
+
+    def get_web_discovery_result(self, result_id: str) -> Optional[dict]:
+        """Retrieve a web discovery result by result ID."""
+        data = self._read_file(self.web_discovery_results_file)
+        return data.get(result_id)
+
+    def list_web_discovery_results(self) -> List[dict]:
+        """Return all stored web discovery results."""
+        data = self._read_file(self.web_discovery_results_file)
+        return list(data.values())
+
+    def list_web_discovery_results_by_session(self, discovery_id: str) -> List[dict]:
+        """Return web discovery results for a specific session."""
+        data = self._read_file(self.web_discovery_results_file)
+        return [r for r in data.values() if r.get("discovery_id") == discovery_id]
+
+    def list_web_discovery_results_by_case(self, case_id: str) -> List[dict]:
+        """Return web discovery results for a specific case."""
+        data = self._read_file(self.web_discovery_results_file)
+        return [r for r in data.values() if r.get("case_id") == case_id]

@@ -184,6 +184,10 @@ class ReportingService:
                     rep_ev_id = pr.get("evidence_id") or rep_ev_id
                     break
 
+        # 6b. Web Discovery sessions and results for this case
+        web_discovery_sessions = self.store.list_web_discovery_sessions_by_case(case_id)
+        web_discovery_results = self.store.list_web_discovery_results_by_case(case_id)
+
         # 7. Overall Findings Synthesis
         overall_findings = []
         overall_findings.append(f"{len(evidence_items)} digital evidence item(s) preserved in read-only forensic vault with SHA-256 baseline verification.")
@@ -200,6 +204,13 @@ class ReportingService:
             overall_findings.append(f"AI-assisted synthetic media assessments executed for {len(deepfake_findings)} evidence item(s).")
         if prov_records:
             overall_findings.append(f"{len(prov_records)} public URL provenance observation(s) recorded for investigative correlation.")
+        if web_discovery_sessions:
+            completed = [s for s in web_discovery_sessions if s.get("status") in ("COMPLETED", "ACTIVE")]
+            total_matches = sum(s.get("total_results", 0) or s.get("results_count", 0) or s.get("total_candidates", 0) for s in completed)
+            overall_findings.append(
+                f"Public Online Image Discovery & Reverse Search: "
+                f"{len(completed)} search session(s) conducted, {total_matches} candidate public source(s) discovered."
+            )
 
         # 8. Standard Forensic Limitations
         limitations = [
@@ -209,6 +220,8 @@ class ReportingService:
             "Error Level Analysis (ELA) is a probabilistic indicator and cannot independently prove forgery, tampering, or manipulation.",
             "AI-assisted deepfake assessments are probabilistic indicators and should not be treated as definitive proof of manipulation, identity, authorship, ownership, or criminal responsibility.",
             "Public URL observations reflect publicly visible web states at discovery time and do not establish account ownership or publication dates.",
+            "These findings represent investigator-recorded results from Google Lens. Search coverage is limited to publicly accessible and indexed content. The absence of a result does not establish that an image has never been published online.",
+            "Visual similarity does not prove unauthorized distribution, original authorship, tampering, or identity.",
             "DigitalShield forensic reports provide technical documentation and do not determine legal liability or criminal guilt.",
         ]
 
@@ -230,6 +243,8 @@ class ReportingService:
             reported_source_url_recorded_at=rep_rec_at,
             reported_source_url_status=rep_status,
             reported_source_url_evidence_id=rep_ev_id,
+            web_discovery_sessions=web_discovery_sessions,
+            web_discovery_results=web_discovery_results,
         )
 
     def generate_report(

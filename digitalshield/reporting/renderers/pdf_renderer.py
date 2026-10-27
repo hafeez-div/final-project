@@ -435,19 +435,102 @@ class PDFRenderer:
             story.append(t_aud)
             story.append(Spacer(1, 6))
 
+
+        # --- Section 10: Public Online Image Discovery and Reverse Image Search Findings ---
+        sessions = getattr(report, "web_discovery_sessions", []) or []
+        wd_results = getattr(report, "web_discovery_results", []) or []
+        if sessions:
+            story.append(Paragraph("10. Public Online Image Discovery and Reverse Image Search Findings", h2_style))
+            story.append(Paragraph(
+                "Reverse image search results depend on the external provider's indexed and accessible content. "
+                "DigitalShield cannot guarantee discovery of every online occurrence. Perceptual hash similarity "
+                "is an investigative indicator and does not independently establish image identity, unauthorized "
+                "distribution, or the identity of an uploader.",
+                warning_style
+            ))
+            story.append(Spacer(1, 4))
+            for sess in sessions:
+                sid = sess.get("session_id") or sess.get("discovery_id", "N/A")
+                ev_id = sess.get("evidence_id", "N/A")
+                status = sess.get("status", "N/A")
+                started = sess.get("started_at") or sess.get("search_timestamp", "N/A")
+                completed = sess.get("completed_at") or "N/A"
+                provider = sess.get("provider", "Google Cloud Vision Web Detection")
+                total = sess.get("total_results", 0) or sess.get("total_candidates", 0)
+                verified = sess.get("verified_matches", 0)
+                unverified = sess.get("unverified_results", 0)
+                failed = sess.get("failed_sources", 0)
+
+                story.append(Paragraph(f"Session {sid} — Evidence {ev_id}", h3_style))
+                sess_rows = [
+                    [Paragraph("Search Provider:", meta_label), Paragraph(str(provider), body_style)],
+                    [Paragraph("Search Status:", meta_label), Paragraph(str(status), body_style)],
+                    [Paragraph("Initiated (UTC):", meta_label), Paragraph(str(started), body_style)],
+                    [Paragraph("Completed (UTC):", meta_label), Paragraph(str(completed), body_style)],
+                    [Paragraph("Candidate Webpages Discovered:", meta_label), Paragraph(str(total), body_style)],
+                    [Paragraph("Verified Perceptual Matches:", meta_label), Paragraph(str(verified), body_style)],
+                    [Paragraph("Unverified Search Results:", meta_label), Paragraph(str(unverified), body_style)],
+                    [Paragraph("Failed Web Sources:", meta_label), Paragraph(str(failed), body_style)],
+                ]
+                t_sess = Table(sess_rows, colWidths=[160, 344])
+                t_sess.setStyle(TableStyle([
+                    ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#e2e8f0")),
+                    ("TOPPADDING", (0, 0), (-1, -1), 2.5),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
+                ]))
+                story.append(t_sess)
+                story.append(Spacer(1, 4))
+
+                sess_results = [
+                    r for r in wd_results
+                    if r.get("session_id") == sid or r.get("discovery_id") == sid
+                ]
+                if not sess_results:
+                    story.append(Paragraph("No candidate sources recorded for this session.", callout_style))
+                else:
+                    for r in sess_results:
+                        rid = r.get("result_id", "N/A")
+                        platform = r.get("platform") or r.get("domain") or "Web Source"
+                        mtype = r.get("provider_match_type", "N/A")
+                        src_url = r.get("source_url", "N/A")
+                        med_url = r.get("media_url") or "Not available"
+                        calc_sim = r.get("calculated_similarity") or r.get("independent_similarity_score")
+                        sim_str = f"{calc_sim * 100:.1f}%" if calc_sim is not None else "Unverified"
+                        vstatus = r.get("verification_status", "Awaiting review")
+
+                        story.append(Paragraph(f"Discovered Source {rid} — {platform} ({vstatus})", h3_style))
+                        r_rows = [
+                            [Paragraph("Platform / Domain:", meta_label), Paragraph(str(platform), body_style)],
+                            [Paragraph("Webpage Title:", meta_label), Paragraph(str(r.get("page_title") or "Not available"), body_style)],
+                            [Paragraph("Source Webpage URL:", meta_label), Paragraph(src_url[:120], code_style)],
+                            [Paragraph("Candidate Image URL:", meta_label), Paragraph(med_url[:120], code_style)],
+                            [Paragraph("Provider Match Type:", meta_label), Paragraph(str(mtype), body_style)],
+                            [Paragraph("Perceptual Similarity:", meta_label), Paragraph(str(sim_str), body_style)],
+                            [Paragraph("Verification Status:", meta_label), Paragraph(str(vstatus), body_style)],
+                        ]
+                        t_r = Table(r_rows, colWidths=[160, 344])
+                        t_r.setStyle(TableStyle([
+                            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#e2e8f0")),
+                            ("TOPPADDING", (0, 0), (-1, -1), 2.5),
+                            ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
+                        ]))
+                        story.append(t_r)
+                        story.append(Spacer(1, 3))
+            story.append(Spacer(1, 6))
+
         # --- Section 10: Findings & Limitations ---
-        story.append(Paragraph("10. Summary of Objective Findings", h2_style))
+        story.append(Paragraph("11. Summary of Objective Findings", h2_style))
         for item in (report.overall_findings or ["Evidence preserved and verified against SHA-256 baseline."]):
             story.append(Paragraph(f"• {item}", body_style))
         story.append(Spacer(1, 6))
 
-        story.append(Paragraph("11. Forensic & Legal Limitations", h2_style))
+        story.append(Paragraph("12. Forensic & Legal Limitations", h2_style))
         for lim in (report.limitations or ["Analysis outputs are probabilistic and require independent human review."]):
             story.append(Paragraph(f"• {lim}", body_style))
         story.append(Spacer(1, 6))
 
         # --- Section 12: Notes ---
-        story.append(Paragraph("12. Investigator / Case Notes", h2_style))
+        story.append(Paragraph("13. Investigator / Case Notes", h2_style))
         story.append(Paragraph(report.investigator_notes if report.investigator_notes else "None recorded.", body_style))
 
         # Build PDF with dynamic NumberedCanvas

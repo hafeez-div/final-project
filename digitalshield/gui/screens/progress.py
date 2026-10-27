@@ -19,6 +19,7 @@ class ProgressScreen(ttk.Frame):
         "Perceptual Hashing (aHash, dHash, pHash)",
         "Error Level Analysis (ELA) Compression Variance",
         "AI-Assisted Deepfake & Synthetic Media Evaluation",
+        "Automatic Reverse Image Search & Public Web Discovery",
     ]
 
     def __init__(self, parent, app):

@@ -85,6 +85,16 @@ class ReportData(BaseModel):
     reported_source_url_status: Optional[str] = Field(default=None, description="Verification status of reported source URL")
     reported_source_url_evidence_id: Optional[str] = Field(default=None, description="Associated evidence ID")
 
+    # Public Image / Video Source Discovery (Google Cloud Vision Web Detection)
+    web_discovery_sessions: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="Web discovery session records (one per evidence item searched)"
+    )
+    web_discovery_results: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="Individual discovered source results from web discovery sessions"
+    )
+
     def to_dict(self) -> dict:
         """Convert ReportData to dictionary."""
         return self.model_dump()
