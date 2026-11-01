@@ -28,7 +28,7 @@ from digitalshield.web_discovery.google_lens_provider import (
     GoogleLensProvider,
     ReverseSearchProviderError,
 )
-from digitalshield.web_discovery.lens_models import detect_platform_name
+from digitalshield.web_discovery.lens_models import detect_platform_name, detect_source_type, is_google_thumbnail_url
 from digitalshield.web_discovery.models import WebDiscoveryResult, WebDiscoverySession
 from digitalshield.web_discovery.page_enricher import deduplicate_urls, enrich_page, normalize_url
 from digitalshield.web_discovery.providers.base_provider import BaseReverseImageProvider
@@ -432,7 +432,7 @@ class WebDiscoveryService:
         candidates: List[Dict[str, Any]] = []
         seen_norms: set = set()
 
-        def _add(url: str, mtype: str, score=None, media_urls=None, title=None):
+        def _add(url: str, mtype: str, score=None, media_urls=None, title=None, thumbnail=None, source_image=None):
             norm = normalize_url(url)
             if norm not in seen_norms:
                 seen_norms.add(norm)
@@ -442,25 +442,59 @@ class WebDiscoveryService:
                     "provider_score": score,
                     "media_urls": media_urls or [],
                     "title": title,
+                    "thumbnail": thumbnail,       # Google CDN thumbnail URL
+                    "source_image": source_image, # Actual image on publishing site
                 })
 
-        for url in web_data.get("full_matching_image_urls", []):
-            _add(url, "EXACT_MATCH")
-        for url in web_data.get("partial_matching_image_urls", []):
-            _add(url, "PARTIAL_MATCH")
-        for url in web_data.get("visually_similar_image_urls", []):
-            _add(url, "VISUALLY_SIMILAR")
+        # Track thumbnails associated with candidate pages to prevent duplicate thumbnail-as-webpage entries
+        known_page_thumbnails = set()
+
+        # Prioritize actual candidate webpages from pages_with_matching_images
         for page in web_data.get("pages_with_matching_images", []):
             page_url = page.get("url", "")
             if page_url:
-                media_urls = page.get("full_images", []) + page.get("partial_images", [])
+                thumb = page.get("thumbnail")
+                src_img = page.get("source_image")
+                if thumb:
+                    known_page_thumbnails.add(normalize_url(thumb))
+                if src_img:
+                    known_page_thumbnails.add(normalize_url(src_img))
+
+                media_urls = []
+                if src_img:
+                    media_urls.append(src_img)
+                if thumb:
+                    media_urls.append(thumb)
+                media_urls += page.get("full_images", []) + page.get("partial_images", [])
+
+                is_thumb = is_google_thumbnail_url(page_url)
+                match_type = "VISUALLY_SIMILAR" if is_thumb else ("EXACT_MATCH" if page.get("score") == 1.0 else "PAGE_WITH_IMAGE")
+
                 _add(
                     page_url,
-                    "PAGE_WITH_IMAGE",
+                    match_type,
                     score=page.get("score"),
                     media_urls=media_urls,
                     title=page.get("page_title"),
+                    thumbnail=thumb or (page_url if is_thumb else None),
+                    source_image=src_img,
                 )
+
+        # Process exact matching image URLs
+        for url in web_data.get("full_matching_image_urls", []):
+            if normalize_url(url) not in known_page_thumbnails:
+                _add(url, "EXACT_MATCH", score=1.0, media_urls=[url])
+
+        # Process partial matching image URLs
+        for url in web_data.get("partial_matching_image_urls", []):
+            if normalize_url(url) not in known_page_thumbnails:
+                _add(url, "PARTIAL_MATCH", media_urls=[url])
+
+        # Process visually similar image URLs (skip Google thumbnails that already belong to a page)
+        for url in web_data.get("visually_similar_image_urls", []):
+            norm_u = normalize_url(url)
+            if norm_u not in known_page_thumbnails and not is_google_thumbnail_url(url):
+                _add(url, "VISUALLY_SIMILAR", media_urls=[url])
 
         verified_count = 0
         exact_count = 0
@@ -547,6 +581,16 @@ class WebDiscoveryService:
                 unverified_count += 1
 
             platform_name = detect_platform_name(entry["url"])
+            source_type = detect_source_type(platform_name, entry["url"])
+            is_gthumbnail = is_google_thumbnail_url(entry["url"])
+
+            # For Google thumbnail URLs: don't use as page_url for enrichment,
+            # but do use as the candidate image for perceptual hashing.
+            # The enriched page_info will still be attempted, but SSRF filter
+            # may allow gstatic.com (it's public). The platform will be clearly labeled.
+
+            # Prefer source_image over thumbnail for perceptual hash comparison
+            candidate_thumbnail = entry.get("thumbnail")
 
             wdr = WebDiscoveryResult(
                 result_id=result_id,
@@ -554,11 +598,17 @@ class WebDiscoveryService:
                 evidence_id=evidence_id,
                 case_id=evidence.case_id,
                 source_url=entry["url"],
-                page_title=page_info.get("page_title"),
+                page_title=page_info.get("page_title") or page_info.get("og_title"),
                 domain=page_info.get("domain") or platform_name,
                 platform=platform_name,
+                source_type=source_type,
+                is_google_thumbnail=is_gthumbnail,
+                thumbnail_url=candidate_thumbnail,
+                og_title=page_info.get("og_title"),
+                og_image=page_info.get("og_image"),
+                author=page_info.get("author"),
                 media_url=target_media,
-                canonical_url=page_info.get("canonical_url"),
+                canonical_url=page_info.get("canonical_url") or page_info.get("og_url"),
                 provider_match_type=entry["match_type"],
                 provider_similarity=entry.get("provider_score"),
                 provider_score=entry.get("provider_score"),
@@ -575,7 +625,11 @@ class WebDiscoveryService:
                 retrieval_status=page_info.get("retrieval_status", "RETRIEVED"),
                 verification_status=classification,
                 status="Source discovered",
-                notes=page_info.get("notes"),
+                notes=(
+                    f"Google-hosted thumbnail preview; original source webpage not provided by search engine. {page_info.get('notes') or ''}".strip()
+                    if is_gthumbnail
+                    else page_info.get("notes")
+                ),
                 limitations=base_limitations,
             )
             stored_results.append(wdr)
@@ -597,6 +651,13 @@ class WebDiscoveryService:
         duration = round((completed_dt - start_dt).total_seconds(), 3)
         session_status = "COMPLETED" if len(candidates) > 0 else "NO_RESULTS"
 
+        # Compute platform counts (excluding Google thumbnail cache entries)
+        platform_counts: Dict[str, int] = {}
+        for r in stored_results:
+            pname = r.platform or "Web Source"
+            platform_counts[pname] = platform_counts.get(pname, 0) + 1
+        distinct = len(platform_counts)
+
         session = WebDiscoverySession(
             session_id=session_id,
             case_id=evidence.case_id,
@@ -616,6 +677,8 @@ class WebDiscoveryService:
             unverified_results=unverified_count,
             failed_sources=failed_count,
             best_guess_labels=web_data.get("best_guess_labels", []),
+            platform_counts=platform_counts,
+            distinct_platforms=distinct,
             is_video_evidence=False,
             limitations=base_limitations,
         )

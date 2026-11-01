@@ -425,6 +425,8 @@ class HTMLRenderer:
                 doc.append(f"<tr><td>Completion Timestamp (UTC)</td><td><code>{esc(completed)}</code></td></tr>")
                 doc.append(f"<tr><td>Total Candidate Webpages</td><td><strong>{total_webpages}</strong></td></tr>")
                 doc.append(f"<tr><td>Total Candidate Images</td><td><strong>{total_images}</strong></td></tr>")
+                distinct_val = sess.get("distinct_platforms", len(sess.get("platform_counts") or {}))
+                doc.append(f"<tr><td>Distinct Platforms Identified</td><td><strong>{distinct_val}</strong></td></tr>")
                 doc.append(f"<tr><td>Exact or Near-Exact Matches</td><td><span style='color:green;'>{exact_matches}</span></td></tr>")
                 doc.append(f"<tr><td>High Visual Similarity Matches</td><td>{high_matches}</td></tr>")
                 doc.append(f"<tr><td>Partial Visual Similarity Matches</td><td>{partial_matches}</td></tr>")
@@ -459,24 +461,98 @@ class HTMLRenderer:
                     else:
                         doc.append("<p class='dim'>No matching public sources were discovered during the search.</p>")
                 else:
-                    doc.append(f"<h3>Discovered Sources & Verification Details ({len(sess_results)})</h3>")
-                    doc.append("<table>")
-                    doc.append("<tr><th>Result ID</th><th>Source Domain</th><th>Page Title</th><th>Match Classification</th><th>Similarity</th><th>Verification</th><th>Source Page</th><th>Candidate Image</th></tr>")
+                    from collections import defaultdict as _dd
+
+                    pcounts: dict = sess.get("platform_counts") or {}
+                    distinct = sess.get("distinct_platforms", len(pcounts))
+
+                    # ── Platform Summary Table ──────────────────────────────
+                    doc.append(f"<h3>Platform Summary — {distinct} Platform{'s' if distinct != 1 else ''} Identified</h3>")
+                    doc.append(
+                        "<div class='callout'><p><strong>Important:</strong> A platform name identifies the "
+                        "hosting website, not the identity of the person who uploaded the content. "
+                        "Google Thumbnail Cache entries are CDN-cached previews and are <strong>NOT</strong> "
+                        "the original publishing webpage.</p></div>"
+                    )
+                    if pcounts:
+                        doc.append("<table>")
+                        doc.append("<tr><th>Platform</th><th>Total Results</th><th>Accessible</th><th>Inaccessible</th></tr>")
+                        for pname, pcount in sorted(pcounts.items(), key=lambda x: -x[1]):
+                            accessible = sum(
+                                1 for r in sess_results
+                                if (r.get("platform") or r.get("domain")) == pname
+                                and r.get("scrape_status") == "SUCCESS"
+                            )
+                            inaccessible = pcount - accessible
+                            doc.append(
+                                f"<tr><td><strong>{esc(pname)}</strong></td><td>{pcount}</td>"
+                                f"<td style='color:green'>{accessible}</td><td>{inaccessible}</td></tr>"
+                            )
+                        doc.append("</table>")
+
+                    # ── Social Media & Public Website Source Findings ────────
+                    doc.append("<h3>Social Media and Public Website Source Findings</h3>")
+
+                    grouped: dict = _dd(list)
                     for r in sess_results:
-                        rid = r.get("result_id", "N/A")
-                        platform = r.get("platform") or r.get("domain") or "Web Source"
-                        mclass = r.get("match_classification") or r.get("provider_match_type", "N/A")
-                        calc_sim = r.get("calculated_similarity") or r.get("independent_similarity_score")
-                        sim_str = f"{calc_sim * 100:.1f}%" if calc_sim is not None else "Unverified"
-                        vstatus = r.get("verification_status", "Awaiting review")
-                        surl = r.get("source_url", "")
-                        murl = r.get("media_url") or ""
+                        pname = r.get("platform") or r.get("domain") or "Web Source"
+                        grouped[pname].append(r)
 
-                        surl_html = f"<a href='{esc(surl)}' rel='noopener noreferrer' target='_blank'><code>{esc(surl[:40])}...</code></a>" if surl else "N/A"
-                        murl_html = f"<a href='{esc(murl)}' rel='noopener noreferrer' target='_blank'>View Media</a>" if murl else "<span class='dim'>N/A</span>"
+                    _priority = [
+                        "X (Twitter)", "Reddit", "Instagram", "Facebook",
+                        "YouTube", "TikTok", "Pinterest", "LinkedIn", "Wikipedia",
+                        "Wikimedia", "Fandom Wiki", "Tumblr", "Flickr",
+                    ]
+                    ordered_platforms = [p for p in _priority if p in grouped]
+                    ordered_platforms += sorted(p for p in grouped if p not in _priority)
 
-                        doc.append(f"<tr><td><code>{esc(rid)}</code></td><td><strong>{esc(platform)}</strong></td><td>{esc(r.get('page_title') or 'Not available')}</td><td>{esc(mclass)}</td><td><strong>{esc(sim_str)}</strong></td><td>{esc(vstatus)}</td><td>{surl_html}</td><td>{murl_html}</td></tr>")
-                    doc.append("</table>")
+                    for pname in ordered_platforms:
+                        p_results = grouped[pname]
+                        doc.append(f"<h4>{esc(pname)} ({len(p_results)} result{'s' if len(p_results) != 1 else ''})</h4>")
+                        doc.append("<table>")
+                        doc.append(
+                            "<tr><th>Page Title</th><th>Source Type</th><th>Original Webpage</th>"
+                            "<th>Image URL</th><th>Author</th><th>Similarity</th><th>Verification</th><th>Accessibility</th></tr>"
+                        )
+                        for r in p_results:
+                            rid       = r.get("result_id", "N/A")
+                            title     = r.get("page_title") or r.get("og_title") or "Not available"
+                            src_type  = r.get("source_type") or "Public Website"
+                            surl      = r.get("source_url") or ""
+                            med_url   = r.get("media_url") or r.get("og_image") or ""
+                            author    = r.get("author") or "<span class='dim'>Not publicly visible</span>"
+                            is_gthumb = r.get("is_google_thumbnail", False)
+                            calc_sim  = r.get("calculated_similarity") or r.get("independent_similarity_score")
+                            sim_str   = f"{calc_sim * 100:.1f}%" if calc_sim is not None else "Unverified"
+                            vstatus   = r.get("verification_status", "Awaiting review")
+                            sstatus   = r.get("scrape_status", "N/A")
+
+                            if surl:
+                                page_label = "Google CDN Thumbnail" if is_gthumb else (surl[:40] + "..." if len(surl) > 40 else surl)
+                                surl_html = f"<a href='{esc(surl)}' rel='noopener noreferrer' target='_blank'><code>{esc(page_label)}</code></a>"
+                                if is_gthumb:
+                                    surl_html += " <small style='color:#f59e0b'>(⚠ Google CDN, not original publisher)</small>"
+                            else:
+                                surl_html = "<span class='dim'>Original source webpage not identified</span>"
+
+                            if med_url:
+                                murl_html = f"<a href='{esc(med_url)}' rel='noopener noreferrer' target='_blank'>View Image</a>"
+                            else:
+                                murl_html = "<span class='dim'>N/A</span>"
+
+                            doc.append(
+                                f"<tr>"
+                                f"<td title='{esc(rid)}'>{esc(title[:50])}</td>"
+                                f"<td>{esc(src_type)}</td>"
+                                f"<td>{surl_html}</td>"
+                                f"<td>{murl_html}</td>"
+                                f"<td>{esc(str(author))}</td>"
+                                f"<td><strong>{esc(sim_str)}</strong></td>"
+                                f"<td>{esc(vstatus)}</td>"
+                                f"<td>{esc(sstatus)}</td>"
+                                f"</tr>"
+                            )
+                        doc.append("</table>")
         doc.append("</div>")
         doc.append("")
 

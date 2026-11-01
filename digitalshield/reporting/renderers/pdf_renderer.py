@@ -454,6 +454,7 @@ class PDFRenderer:
             story.append(Spacer(1, 6))
         else:
             import html as pyhtml
+            from collections import defaultdict as _dd
             for sess in sessions:
                 sid = sess.get("session_id") or sess.get("discovery_id", "N/A")
                 ev_id = sess.get("evidence_id", "N/A")
@@ -463,10 +464,7 @@ class PDFRenderer:
                 provider = sess.get("provider", "Google Lens")
                 sub_status = sess.get("image_submission_status", "SUBMITTED")
                 dur = sess.get("search_duration_seconds")
-                if dur is not None:
-                    dur_str = f"{dur:.3f}s"
-                else:
-                    dur_str = "N/A"
+                dur_str = f"{dur:.3f}s" if dur is not None else "N/A"
                 total_webpages = sess.get("total_results", 0) or sess.get("total_candidates", 0)
                 total_images = sess.get("candidate_images_count", 0)
                 exact_matches = sess.get("exact_matches", 0)
@@ -474,6 +472,8 @@ class PDFRenderer:
                 partial_matches = sess.get("partial_matches", 0)
                 unverified = sess.get("unverified_results", 0)
                 failed = sess.get("failed_sources", 0)
+                pcounts: dict = sess.get("platform_counts") or {}
+                distinct = sess.get("distinct_platforms", len(pcounts))
 
                 story.append(Paragraph(f"Session {sid} — Evidence {ev_id}", h3_style))
                 sess_rows = [
@@ -486,6 +486,7 @@ class PDFRenderer:
                     [Paragraph("Original Evidence ID:", meta_label), Paragraph(str(ev_id), code_style)],
                     [Paragraph("Total Candidate Webpages:", meta_label), Paragraph(str(total_webpages), body_style)],
                     [Paragraph("Total Candidate Images:", meta_label), Paragraph(str(total_images), body_style)],
+                    [Paragraph("Distinct Platforms Identified:", meta_label), Paragraph(str(distinct), body_style)],
                     [Paragraph("Exact or Near-Exact Visual Matches:", meta_label), Paragraph(str(exact_matches), body_style)],
                     [Paragraph("High Visual Similarity Matches:", meta_label), Paragraph(str(high_matches), body_style)],
                     [Paragraph("Partial Visual Similarity Matches:", meta_label), Paragraph(str(partial_matches), body_style)],
@@ -534,64 +535,130 @@ class PDFRenderer:
                     else:
                         story.append(Paragraph("No matching public sources were discovered during the search.", callout_style))
                 else:
-                    # Candidate Results Table
-                    story.append(Paragraph("Candidate Results Table", h3_style))
-                    tbl_data = [[
-                        Paragraph("Source Domain", body_bold),
-                        Paragraph("Page Title", body_bold),
-                        Paragraph("Webpage URL", body_bold),
-                        Paragraph("Discovered Image URL", body_bold),
-                        Paragraph("Similarity", body_bold),
-                        Paragraph("Match Classification", body_bold),
-                        Paragraph("Status", body_bold),
-                    ]]
+                    # ── Platform Summary Table ──────────────────────────────────────
+                    if pcounts:
+                        story.append(Paragraph("Platform Summary", h3_style))
+                        story.append(Paragraph(
+                            "Results grouped by identified publishing platform. "
+                            "Google Thumbnail Cache entries are CDN-cached previews, not original publishing webpages.",
+                            callout_style
+                        ))
+                        plat_hdr = [[
+                            Paragraph("Platform", body_bold),
+                            Paragraph("Total Results", body_bold),
+                            Paragraph("Accessible", body_bold),
+                            Paragraph("Inaccessible", body_bold),
+                        ]]
+                        for pname, pcount in sorted(pcounts.items(), key=lambda x: -x[1]):
+                            accessible = sum(
+                                1 for r in sess_results
+                                if (r.get("platform") or r.get("domain")) == pname
+                                and r.get("scrape_status") == "SUCCESS"
+                            )
+                            inaccessible = pcount - accessible
+                            plat_hdr.append([
+                                Paragraph(pname, body_style),
+                                Paragraph(str(pcount), body_style),
+                                Paragraph(str(accessible), body_style),
+                                Paragraph(str(inaccessible), body_style),
+                            ])
+                        t_plat = Table(plat_hdr, colWidths=[200, 90, 80, 80])
+                        t_plat.setStyle(TableStyle([
+                            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f1f5f9")),
+                            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#e2e8f0")),
+                            ("TOPPADDING", (0, 0), (-1, -1), 2.5),
+                            ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
+                        ]))
+                        story.append(t_plat)
+                        story.append(Spacer(1, 8))
 
+                    # ── Social Media & Public Website Source Findings ───────────────
+                    story.append(Paragraph("Social Media and Public Website Source Findings", h3_style))
+                    story.append(Paragraph(
+                        "Results below are grouped by platform. A platform name identifies the hosting website, "
+                        "not the identity of the person who uploaded the content. All URLs are clickable.",
+                        callout_style,
+                    ))
+                    story.append(Spacer(1, 4))
+
+                    # Group by platform
+                    grouped: dict = _dd(list)
                     for r in sess_results:
-                        platform = r.get("platform") or r.get("domain") or "Web Source"
-                        page_title = r.get("page_title") or "Not available"
-                        src_url = r.get("source_url") or "N/A"
-                        med_url = r.get("media_url") or "N/A"
+                        pname = r.get("platform") or r.get("domain") or "Web Source"
+                        grouped[pname].append(r)
 
-                        calc_sim = r.get("calculated_similarity") or r.get("independent_similarity_score")
-                        sim_str = f"{calc_sim * 100:.1f}%" if calc_sim is not None else "Unverified"
+                    _priority = [
+                        "X (Twitter)", "Reddit", "Instagram", "Facebook",
+                        "YouTube", "TikTok", "Pinterest", "LinkedIn", "Wikipedia",
+                        "Wikimedia", "Fandom Wiki", "Tumblr", "Flickr",
+                    ]
+                    ordered_platforms = [p for p in _priority if p in grouped]
+                    ordered_platforms += sorted(p for p in grouped if p not in _priority)
 
-                        mclass = r.get("match_classification") or r.get("provider_match_type") or "SIMILAR"
-                        vstatus = r.get("verification_status") or r.get("status") or "Discovered"
+                    for pname in ordered_platforms:
+                        p_results = grouped[pname]
+                        story.append(Paragraph(
+                            f"{pname}  ({len(p_results)} result{'s' if len(p_results) != 1 else ''})",
+                            h3_style
+                        ))
 
-                        # Clickable links
-                        if src_url and src_url != "N/A":
-                            esc_src = pyhtml.escape(src_url, quote=True)
-                            disp_src = pyhtml.escape(src_url[:22] + "..." if len(src_url) > 22 else src_url)
-                            src_p = Paragraph(f'<a href="{esc_src}"><font color="#1d4ed8"><u>{disp_src}</u></font></a>', code_style)
-                        else:
-                            src_p = Paragraph("N/A", code_style)
+                        tbl_data = [[
+                            Paragraph("Page Title", body_bold),
+                            Paragraph("Source Type", body_bold),
+                            Paragraph("Webpage URL", body_bold),
+                            Paragraph("Image URL", body_bold),
+                            Paragraph("Similarity", body_bold),
+                            Paragraph("Verification", body_bold),
+                            Paragraph("Accessibility", body_bold),
+                        ]]
 
-                        if med_url and med_url != "N/A" and med_url != "Not available":
-                            esc_med = pyhtml.escape(med_url, quote=True)
-                            disp_med = pyhtml.escape(med_url[:18] + "..." if len(med_url) > 18 else med_url)
-                            med_p = Paragraph(f'<a href="{esc_med}"><font color="#1d4ed8"><u>{disp_med}</u></font></a>', code_style)
-                        else:
-                            med_p = Paragraph("N/A", code_style)
+                        for r in p_results:
+                            page_title  = r.get("page_title") or r.get("og_title") or "Not available"
+                            src_type    = r.get("source_type") or "Public Website"
+                            src_url     = r.get("source_url") or "N/A"
+                            med_url     = r.get("media_url") or r.get("og_image") or "N/A"
+                            is_gthumb   = r.get("is_google_thumbnail", False)
+                            calc_sim    = r.get("calculated_similarity") or r.get("independent_similarity_score")
+                            sim_str     = f"{calc_sim * 100:.1f}%" if calc_sim is not None else "Unverified"
+                            vstatus     = r.get("verification_status") or "Discovered"
+                            sstatus     = r.get("scrape_status", "N/A")
 
-                        tbl_data.append([
-                            Paragraph(str(platform), body_style),
-                            Paragraph(page_title[:28] + "..." if len(page_title) > 28 else page_title, body_style),
-                            src_p,
-                            med_p,
-                            Paragraph(str(sim_str), body_style),
-                            Paragraph(str(mclass), body_style),
-                            Paragraph(str(vstatus), body_style),
-                        ])
+                            thumb_note = " (Google CDN)" if is_gthumb else ""
 
-                    t_cand = Table(tbl_data, colWidths=[65, 75, 95, 85, 48, 76, 60])
-                    t_cand.setStyle(TableStyle([
-                        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f1f5f9")),
-                        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#e2e8f0")),
-                        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                        ("TOPPADDING", (0, 0), (-1, -1), 2.5),
-                        ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
-                    ]))
-                    story.append(t_cand)
+                            if src_url and src_url != "N/A":
+                                esc_src  = pyhtml.escape(src_url, quote=True)
+                                disp_src = pyhtml.escape(src_url[:20] + "..." if len(src_url) > 20 else src_url)
+                                src_p = Paragraph(f'<a href="{esc_src}"><font color="#1d4ed8"><u>{disp_src}</u></font></a>', code_style)
+                            else:
+                                src_p = Paragraph("Not identified" + thumb_note, code_style)
+
+                            if med_url and med_url != "N/A":
+                                esc_med  = pyhtml.escape(med_url, quote=True)
+                                disp_med = pyhtml.escape(med_url[:16] + "..." if len(med_url) > 16 else med_url)
+                                med_p = Paragraph(f'<a href="{esc_med}"><font color="#1d4ed8"><u>{disp_med}</u></font></a>', code_style)
+                            else:
+                                med_p = Paragraph("N/A", code_style)
+
+                            tbl_data.append([
+                                Paragraph((page_title[:30] + "..." if len(page_title) > 30 else page_title) + thumb_note, body_style),
+                                Paragraph(src_type[:22], body_style),
+                                src_p,
+                                med_p,
+                                Paragraph(sim_str, body_style),
+                                Paragraph(vstatus[:20], body_style),
+                                Paragraph(sstatus, body_style),
+                            ])
+
+                        t_cand = Table(tbl_data, colWidths=[82, 72, 90, 72, 42, 72, 52])
+                        t_cand.setStyle(TableStyle([
+                            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f1f5f9")),
+                            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#e2e8f0")),
+                            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                            ("TOPPADDING", (0, 0), (-1, -1), 2.5),
+                            ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
+                        ]))
+                        story.append(t_cand)
+                        story.append(Spacer(1, 6))
 
                 story.append(Spacer(1, 6))
             story.append(Spacer(1, 6))

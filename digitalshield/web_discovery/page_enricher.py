@@ -70,6 +70,99 @@ def deduplicate_urls(urls: List[str]) -> List[str]:
     return result
 
 
+def _extract_page_metadata_from_html(html_content: bytes, base_url: str = "") -> Dict:
+    """
+    Extract rich metadata from HTML using Scrapling's Selector.
+    Extracts: page title, Open Graph title/image/url, canonical URL,
+    publication timestamp, author, and the first usable image URL.
+
+    Returns a dict with all extracted fields (may be None if not found).
+    """
+    result = {
+        "page_title": None,
+        "og_title": None,
+        "og_image": None,
+        "og_url": None,
+        "canonical_url": None,
+        "publication_timestamp": None,
+        "author": None,
+        "image_urls": [],
+    }
+    try:
+        from scrapling import Selector
+        text = html_content.decode("utf-8", errors="ignore")
+        sel = Selector(text)
+
+        # Page title
+        titles = sel.css("title::text").getall()
+        if titles:
+            result["page_title"] = " ".join(titles).strip()[:200]
+
+        # Open Graph metadata
+        for prop in sel.css("meta[property]"):
+            p = (prop.attrib.get("property") or "").lower()
+            c = (prop.attrib.get("content") or "").strip()
+            if not c:
+                continue
+            if p == "og:title":
+                result["og_title"] = c[:200]
+            elif p == "og:image":
+                result["og_image"] = c
+            elif p == "og:url":
+                result["og_url"] = c
+            elif p in ("article:published_time", "og:updated_time", "article:modified_time"):
+                if not result["publication_timestamp"]:
+                    result["publication_timestamp"] = c
+
+        # Twitter Card metadata (fallback for og missing)
+        for meta in sel.css("meta[name]"):
+            n = (meta.attrib.get("name") or "").lower()
+            c = (meta.attrib.get("content") or "").strip()
+            if not c:
+                continue
+            if n == "twitter:title" and not result["og_title"]:
+                result["og_title"] = c[:200]
+            elif n == "twitter:image" and not result["og_image"]:
+                result["og_image"] = c
+            elif n in ("author", "article:author", "dc.creator") and not result["author"]:
+                result["author"] = c[:100]
+
+        # Canonical URL
+        for link in sel.css("link[rel='canonical']"):
+            href = (link.attrib.get("href") or "").strip()
+            if href:
+                result["canonical_url"] = href
+                break
+
+        # Publication timestamp from <time> elements
+        if not result["publication_timestamp"]:
+            pub_times = sel.css("time[datetime]::attr(datetime)").getall()
+            if pub_times:
+                result["publication_timestamp"] = pub_times[0].strip()
+
+        # Collect image URLs from <img src>, og:image (already done), link[rel=image_src]
+        imgs = []
+        for img_src in sel.css("img[src]::attr(src)").getall():
+            imgs.append(img_src.strip())
+        for li in sel.css("link[rel='image_src']::attr(href)").getall():
+            imgs.append(li.strip())
+        # If og:image was found, put it first
+        if result["og_image"]:
+            imgs = [result["og_image"]] + imgs
+        # Resolve relative URLs
+        abs_imgs = []
+        for img in imgs:
+            if img.startswith(("http://", "https://")):
+                abs_imgs.append(img)
+            elif base_url and img.startswith("/"):
+                abs_imgs.append(urllib.parse.urljoin(base_url, img))
+        result["image_urls"] = abs_imgs
+
+    except Exception:
+        pass
+    return result
+
+
 def _extract_image_urls_from_html(html_content: bytes) -> List[str]:
     """
     Extract <img src> URLs from HTML using lxml via Scrapling's Selector.
@@ -103,6 +196,8 @@ def enrich_page(
 
     Returns a dict with keys:
         source_url, page_title, domain, media_url,
+        og_title, og_image, og_url, canonical_url,
+        publication_timestamp, author,
         retrieval_timestamp, retrieval_status, notes
     """
     if client is None:
@@ -121,6 +216,11 @@ def enrich_page(
         "page_title": provided_title,
         "domain": domain,
         "media_url": None,
+        "og_title": None,
+        "og_image": None,
+        "og_url": None,
+        "canonical_url": None,
+        "author": None,
         "publication_timestamp": None,
         "http_status": None,
         "retrieval_timestamp": retrieval_timestamp,
@@ -160,28 +260,27 @@ def enrich_page(
         result["notes"] = f"HTTP {status_code} received from public resource."
         return result
 
-    # Extract page title via Scrapling if HTML
-    if not result["page_title"]:
-        if "text/html" in content_type or content.strip().startswith(b"<"):
-            try:
-                from scrapling import Selector
-                html_text = content.decode("utf-8", errors="ignore")
-                sel = Selector(html_text)
-                titles = sel.css("title::text").getall()
-                if titles:
-                    result["page_title"] = " ".join(titles).strip()[:200]
-                pub_times = sel.css("meta[property='article:published_time']::attr(content), time::attr(datetime)").getall()
-                if pub_times:
-                    result["publication_timestamp"] = pub_times[0].strip()
-            except Exception:
-                # Fallback to existing SafePublicClient method
-                meta = client.extract_public_metadata(content, content_type)
-                result["page_title"] = meta.get("source_title")
+    # Extract rich metadata if HTML
+    if "text/html" in content_type or content.strip().startswith(b"<"):
+        meta = _extract_page_metadata_from_html(content, base_url=validated_url)
 
-    # Determine media URL
+        # Page title: prefer og:title for social platforms, then <title>
+        if not result["page_title"]:
+            result["page_title"] = meta.get("og_title") or meta.get("page_title")
+
+        result["og_title"] = meta.get("og_title")
+        result["og_image"] = meta.get("og_image")
+        result["og_url"] = meta.get("og_url")
+        result["canonical_url"] = result["canonical_url"] or meta.get("canonical_url")
+        result["author"] = meta.get("author")
+        result["publication_timestamp"] = result["publication_timestamp"] or meta.get("publication_timestamp")
+        scraped_images = meta.get("image_urls", [])
+    else:
+        scraped_images = []
+
+    # Determine media URL for perceptual hash comparison
     # 1. Use provider-supplied media URLs if already known
     if provided_media_urls:
-        # Validate each through SSRF filter
         for murl in provided_media_urls:
             try:
                 validated_murl = client.validate_url(murl)
@@ -194,13 +293,20 @@ def enrich_page(
     if not result["media_url"] and content_type.startswith("image/"):
         result["media_url"] = validated_url
 
-    # 3. Scrape <img> tags from HTML for first public image
-    if not result["media_url"] and ("text/html" in content_type or content.strip().startswith(b"<")):
-        img_urls = _extract_image_urls_from_html(content)
-        for img_url in img_urls:
+    # 3. Use og:image if available (highest quality image reference from the page)
+    if not result["media_url"] and result["og_image"]:
+        try:
+            validated_og = client.validate_url(result["og_image"])
+            result["media_url"] = validated_og
+        except ValueError:
+            pass
+
+    # 4. Scrape <img> tags from HTML
+    if not result["media_url"] and scraped_images:
+        for img_url in scraped_images:
+            if img_url == result["og_image"]:
+                continue  # already tried
             try:
-                client.validate_url(img_url)
-                # Make absolute if relative
                 abs_img = urllib.parse.urljoin(page_url, img_url)
                 client.validate_url(abs_img)
                 result["media_url"] = abs_img

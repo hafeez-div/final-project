@@ -20,15 +20,16 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from PIL import Image
 
 from digitalshield.web_discovery.providers.base_provider import BaseReverseImageProvider
 
 REQUEST_TIMEOUT = 30  # seconds
-MAX_IMAGE_BYTES = 20 * 1024 * 1024   # 20 MB limit
-RESIZE_THRESHOLD = 10 * 1024 * 1024  # Resize in-memory if >10 MB
+MAX_IMAGE_BYTES = 20 * 1024 * 1024   # 20 MB absolute safety limit
+MAX_GATEWAY_UPLOAD_BYTES = 500 * 1024  # 500 KB SerpApi upload limit
+OPTIMIZED_TARGET_BYTES = 485 * 1024    # Target safely under 500 KB
 
 
 class ReverseSearchProviderError(Exception):
@@ -61,29 +62,73 @@ class GoogleLensProvider(BaseReverseImageProvider):
                 return val
         return None
 
-    @staticmethod
-    def _prepare_image_bytes(image_path: Path) -> bytes:
+    @classmethod
+    def _prepare_image_bytes(cls, image_path: Path) -> Tuple[bytes, str, str]:
         """
-        Load image from read-only evidence vault and prepare bytes.
-        Resizes in-memory if exceeding threshold; never modifies original file.
+        Load image from read-only evidence vault and optimize for gateway upload.
+
+        STRICT FORENSIC & INTEGRITY RULES:
+        - NEVER modifies original evidence vault files.
+        - Generates in-memory optimized payload under 500 KB when evidence exceeds limit.
+        - Cleaned up in memory with zero leaked disk temporary files.
+
+        Returns:
+            Tuple of (payload_bytes, content_type, upload_filename)
         """
         with open(image_path, "rb") as f:
             raw_bytes = f.read()
 
-        if len(raw_bytes) > RESIZE_THRESHOLD:
-            with Image.open(io.BytesIO(raw_bytes)) as img:
-                img.thumbnail((2000, 2000), Image.LANCZOS)
-                buf = io.BytesIO()
-                fmt = img.format or "JPEG"
-                img.save(buf, format=fmt)
-                raw_bytes = buf.getvalue()
-
         if len(raw_bytes) > MAX_IMAGE_BYTES:
             raise ValueError(
-                f"Image ({len(raw_bytes) // 1024} KB) exceeds the safe limit "
+                f"Image ({len(raw_bytes) // (1024 * 1024)} MB) exceeds the absolute limit "
                 f"of {MAX_IMAGE_BYTES // (1024 * 1024)} MB."
             )
-        return raw_bytes
+
+        filename = image_path.name
+        content_type = "image/jpeg"
+        if filename.lower().endswith(".png"):
+            content_type = "image/png"
+        elif filename.lower().endswith(".webp"):
+            content_type = "image/webp"
+
+        # If already below gateway limit, return original bytes directly
+        if len(raw_bytes) <= MAX_GATEWAY_UPLOAD_BYTES:
+            return raw_bytes, content_type, filename
+
+        # Evidence is > 500 KB: generate in-memory optimized JPEG
+        with Image.open(io.BytesIO(raw_bytes)) as img:
+            # Handle alpha transparency if converting to JPEG
+            if img.mode in ("RGBA", "LA", "P"):
+                rgb = Image.new("RGB", img.size, (255, 255, 255))
+                if img.mode == "P":
+                    img = img.convert("RGBA")
+                mask = img.split()[3] if len(img.split()) == 4 else None
+                rgb.paste(img, mask=mask)
+            else:
+                rgb = img.convert("RGB")
+
+            # Progressive compression quality adjustment
+            buf = io.BytesIO()
+            for q in (85, 75, 65, 50):
+                buf.seek(0)
+                buf.truncate()
+                rgb.save(buf, format="JPEG", quality=q, optimize=True)
+                if buf.tell() <= OPTIMIZED_TARGET_BYTES:
+                    break
+
+            # If still > target, downscale dimensions
+            if buf.tell() > OPTIMIZED_TARGET_BYTES:
+                for max_dim in (1600, 1200, 1000, 800):
+                    rgb.thumbnail((max_dim, max_dim), Image.LANCZOS)
+                    buf.seek(0)
+                    buf.truncate()
+                    rgb.save(buf, format="JPEG", quality=75, optimize=True)
+                    if buf.tell() <= OPTIMIZED_TARGET_BYTES:
+                        break
+
+            optimized_bytes = buf.getvalue()
+
+        return optimized_bytes, "image/jpeg", f"{image_path.stem}.jpg"
 
     def search_web(self, image_path: Path) -> Dict[str, Any]:
         """
@@ -128,16 +173,9 @@ class GoogleLensProvider(BaseReverseImageProvider):
         """
         Query SearchApi.io Google Lens engine via standard HTTPS multipart upload.
         """
-        image_bytes = self._prepare_image_bytes(image_path)
+        image_bytes, content_type, filename = self._prepare_image_bytes(image_path)
         boundary = "----DigitalShieldBoundary7MA4YWxkTrZu0gW"
         body = io.BytesIO()
-
-        filename = image_path.name
-        content_type = "image/jpeg"
-        if filename.lower().endswith(".png"):
-            content_type = "image/png"
-        elif filename.lower().endswith(".webp"):
-            content_type = "image/webp"
 
         body.write(f"--{boundary}\r\n".encode("utf-8"))
         body.write(
@@ -209,20 +247,13 @@ class GoogleLensProvider(BaseReverseImageProvider):
         Step 1: Upload original evidence image to https://serpapi.com/image via multipart POST to get image_id.
         Step 2: Query https://serpapi.com/search?engine=google_lens&image_id=<id>&api_key=<key>&hl=en&type=visual_matches via GET.
         """
-        image_bytes = self._prepare_image_bytes(image_path)
+        image_bytes, content_type, filename = self._prepare_image_bytes(image_path)
 
         # -------------------------------------------------------------
         # STEP 1: Upload image to SerpApi Image API
         # -------------------------------------------------------------
         boundary = "----DigitalShieldBoundary7MA4YWxkTrZu0gW"
         body = io.BytesIO()
-
-        filename = image_path.name
-        content_type = "image/jpeg"
-        if filename.lower().endswith(".png"):
-            content_type = "image/png"
-        elif filename.lower().endswith(".webp"):
-            content_type = "image/webp"
 
         # The image field must be named 'image'
         body.write(f"--{boundary}\r\n".encode("utf-8"))
@@ -351,7 +382,7 @@ class GoogleLensProvider(BaseReverseImageProvider):
 
     def _query_custom_endpoint(self, image_path: Path, endpoint: str) -> Dict[str, Any]:
         """Query a custom compliant Google Lens endpoint."""
-        image_bytes = self._prepare_image_bytes(image_path)
+        image_bytes, _, _ = self._prepare_image_bytes(image_path)
         req = urllib.request.Request(
             endpoint,
             data=image_bytes,
@@ -369,6 +400,17 @@ class GoogleLensProvider(BaseReverseImageProvider):
     def _parse_lens_response(data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Parse raw Google Lens gateway response into DigitalShield standardized format.
+
+        Key insight: SerpApi Google Lens response structure:
+          - visual_matches[].link  → original SOURCE PAGE URL (e.g. reddit.com/..., wikipedia.org/...)
+          - visual_matches[].thumbnail → Google-hosted thumbnail cache URL (encrypted-tbn*.gstatic.com)
+          - visual_matches[].image → sometimes the direct image URL on the source site
+
+        We MUST keep page URLs and thumbnail URLs separate so the service layer can:
+        1. Store the original source page URL as source_url.
+        2. Store the Google thumbnail as thumbnail_url (clearly labeled).
+        3. Use the source page for Scrapling enrichment.
+        4. Use the thumbnail for perceptual hash comparison (as the candidate image).
         """
         visual_matches = data.get("visual_matches", [])
         pages = []
@@ -376,37 +418,89 @@ class GoogleLensProvider(BaseReverseImageProvider):
         exact_images = []
 
         for m in visual_matches:
+            # The 'link' field is the actual webpage on the publishing platform
             page_url = m.get("link") or m.get("url")
             if not page_url:
                 continue
 
-            img_url = m.get("thumbnail") or m.get("source_image") or m.get("image")
-            img_list = [img_url] if img_url else []
-            if img_url:
-                similar_images.append(img_url)
+            # thumbnail is the Google-cached preview image; 'image' may be the actual source image
+            thumbnail = m.get("thumbnail")
+            source_image = m.get("image") or m.get("source_image")
+            # Prefer the actual source image URL; fall back to thumbnail for hash comparison
+            candidate_img = source_image or thumbnail
+
+            if candidate_img:
+                similar_images.append(candidate_img)
 
             pages.append({
                 "url": page_url,
                 "page_title": m.get("title") or m.get("source"),
-                "full_images": img_list,
+                "full_images": [source_image] if source_image else [],
                 "partial_images": [],
-                "score": None,  # Provider does not give a calibrated float
+                "thumbnail": thumbnail,         # Google CDN thumbnail — NOT the publishing site
+                "source_image": source_image,   # Actual image on publishing site if available
+                "score": None,
+                "position": m.get("position"),
             })
 
-        # Also parse exact matches if present
+        # Parse exact matches if present
         for em in data.get("exact_matches", []):
             e_url = em.get("link") or em.get("url")
-            e_img = em.get("thumbnail") or em.get("source_image") or em.get("image")
+            e_thumbnail = em.get("thumbnail")
+            e_source_img = em.get("image") or em.get("source_image")
+            e_img = e_source_img or e_thumbnail
             if e_url:
                 pages.append({
                     "url": e_url,
                     "page_title": em.get("title") or em.get("source"),
-                    "full_images": [e_img] if e_img else [],
+                    "full_images": [e_source_img] if e_source_img else [],
                     "partial_images": [],
+                    "thumbnail": e_thumbnail,
+                    "source_image": e_source_img,
                     "score": 1.0,
+                    "position": em.get("position"),
                 })
             if e_img:
                 exact_images.append(e_img)
+
+        # Also collect from organic_results (standard web search results that include image matches)
+        for org in data.get("organic_results", []):
+            o_url = org.get("link") or org.get("url")
+            if not o_url:
+                continue
+            o_thumbnail = org.get("thumbnail")
+            o_img = org.get("image")
+            # Only include if organic result has an associated image
+            if o_img or o_thumbnail:
+                pages.append({
+                    "url": o_url,
+                    "page_title": org.get("title"),
+                    "full_images": [o_img] if o_img else [],
+                    "partial_images": [],
+                    "thumbnail": o_thumbnail,
+                    "source_image": o_img,
+                    "score": None,
+                    "position": org.get("position"),
+                })
+                if o_img:
+                    similar_images.append(o_img)
+
+        # Collect from related_content if image URLs present
+        for rc in data.get("related_content", []):
+            rc_url = rc.get("link") or rc.get("url")
+            if not rc_url:
+                continue
+            rc_img = rc.get("thumbnail") or rc.get("image")
+            pages.append({
+                "url": rc_url,
+                "page_title": rc.get("title"),
+                "full_images": [],
+                "partial_images": [],
+                "thumbnail": rc_img,
+                "source_image": None,
+                "score": None,
+                "position": None,
+            })
 
         best_guess = []
         if "knowledge_graph" in data and isinstance(data["knowledge_graph"], dict):

@@ -374,6 +374,8 @@ class MarkdownRenderer:
                 verified = sess.get("verified_matches", 0)
                 unverified = sess.get("unverified_results", 0)
                 failed = sess.get("failed_sources", 0)
+                pcounts: dict = sess.get("platform_counts") or {}
+                distinct = sess.get("distinct_platforms", len(pcounts))
 
                 lines.append(f"## Session {sid} — Evidence {ev_id}")
                 lines.append("")
@@ -389,6 +391,7 @@ class MarkdownRenderer:
                 lines.append(f"| **Completion Timestamp (UTC)** | {completed} |")
                 lines.append(f"| **Total Candidate Webpages Discovered** | {total_webpages} |")
                 lines.append(f"| **Total Candidate Images** | {total_images} |")
+                lines.append(f"| **Distinct Platforms Identified** | {distinct} |")
                 lines.append(f"| **Exact or Near-Exact Visual Matches** | {exact_matches} |")
                 lines.append(f"| **High Visual Similarity Matches** | {high_matches} |")
                 lines.append(f"| **Partial Visual Similarity Matches** | {partial_matches} |")
@@ -424,47 +427,102 @@ class MarkdownRenderer:
                         lines.append("*No matching public sources were discovered during the search.*")
                     lines.append("")
                 else:
-                    lines.append(f"### Discovered Sources & Verification Details ({len(sess_results)})")
-                    lines.append("")
-                    for r in sess_results:
-                        rid = r.get("result_id", "N/A")
-                        platform = r.get("platform") or r.get("domain") or "Web Source"
-                        title = r.get("page_title") or "Not available"
-                        src_url = r.get("source_url", "N/A")
-                        med_url = r.get("media_url") or "Not available"
-                        mtype = r.get("provider_match_type", "N/A")
-                        prov_score = f"{r['provider_similarity']:.4f}" if r.get("provider_similarity") is not None else "N/A"
-                        calc_val = r.get("calculated_similarity") or r.get("independent_similarity_score")
-                        calc_score = f"{calc_val:.4f}" if calc_val is not None else "Not calculated"
-                        method_str = r.get("independent_matching_method") or "pHash+aHash+dHash (independently calculated by DigitalShield)"
-                        ahash_d = r.get("ahash_distance", "N/A")
-                        dhash_d = r.get("dhash_distance", "N/A")
-                        phash_d = r.get("phash_distance", "N/A")
-                        vstatus = r.get("verification_status", "Awaiting investigator review")
-                        sstatus = r.get("scrape_status", "N/A")
-                        ts = r.get("discovery_timestamp") or r.get("retrieval_timestamp", "N/A")
+                    # ── Platform Summary Table ──────────────────────────────────────
+                    if pcounts:
+                        lines.append("### Platform Summary")
+                        lines.append("")
+                        lines.append("| Platform | Results | Accessible | Inaccessible |")
+                        lines.append("| :--- | :---: | :---: | :---: |")
+                        for pname, pcount in sorted(pcounts.items(), key=lambda x: -x[1]):
+                            accessible = sum(
+                                1 for r in sess_results
+                                if (r.get("platform") or r.get("domain")) == pname
+                                and r.get("scrape_status") == "SUCCESS"
+                            )
+                            inaccessible = pcount - accessible
+                            lines.append(f"| {pname} | {pcount} | {accessible} | {inaccessible} |")
+                        lines.append("")
 
-                        lines.append(f"#### {rid} — {platform} ({vstatus})")
+                    # ── Social Media & Public Website Source Findings ───────────────
+                    lines.append("### Social Media and Public Website Source Findings")
+                    lines.append("")
+                    lines.append(
+                        "> [!NOTE]\n"
+                        "> Results below are grouped by platform. A platform name identifies the hosting website, "
+                        "not the identity of the person who uploaded the content. "
+                        "Google Thumbnail Cache entries (encrypted-tbn*.gstatic.com) are CDN-cached previews "
+                        "and are NOT the original publishing webpage."
+                    )
+                    lines.append("")
+
+                    # Group results by platform
+                    from collections import defaultdict as _dd
+                    grouped: dict = _dd(list)
+                    for r in sess_results:
+                        pname = r.get("platform") or r.get("domain") or "Web Source"
+                        grouped[pname].append(r)
+
+                    # Define rendering order: social first, then alphabetical
+                    _priority = [
+                        "X (Twitter)", "Reddit", "Instagram", "Facebook",
+                        "YouTube", "TikTok", "Pinterest", "LinkedIn", "Wikipedia",
+                        "Wikimedia", "Fandom Wiki", "Tumblr", "Flickr",
+                    ]
+                    ordered_platforms = [p for p in _priority if p in grouped]
+                    ordered_platforms += sorted(p for p in grouped if p not in _priority)
+
+                    for pname in ordered_platforms:
+                        p_results = grouped[pname]
+                        lines.append(f"#### {pname} ({len(p_results)} result{'s' if len(p_results) != 1 else ''})")
                         lines.append("")
                         lines.append("| Field | Value |")
                         lines.append("| :--- | :--- |")
-                        lines.append(f"| **Platform / Domain** | {platform} |")
-                        lines.append(f"| **Webpage Title** | {title} |")
-                        lines.append(f"| **Source Webpage URL** | [{src_url}]({src_url}) |")
-                        if med_url != "Not available":
-                            lines.append(f"| **Candidate Image URL** | [{med_url}]({med_url}) |")
-                        else:
-                            lines.append("| **Candidate Image URL** | Not available |")
-                        lines.append(f"| **Discovery Timestamp (UTC)** | {ts} |")
-                        lines.append(f"| **Provider Match Type** | {mtype} (provider-reported) |")
-                        lines.append(f"| **Provider Similarity** | {prov_score} |")
-                        lines.append(f"| **Independent Hash Similarity** | {calc_score} ({method_str}) |")
-                        lines.append(f"| **Hamming Distances** | aHash: {ahash_d}, dHash: {dhash_d}, pHash: {phash_d} |")
-                        lines.append(f"| **Verification Status** | {vstatus} |")
-                        lines.append(f"| **Scraping Status** | {sstatus} |")
-                        if r.get("notes"):
-                            lines.append(f"| **Investigator Notes** | {r['notes']} |")
-                        lines.append("")
+
+                        for r in p_results:
+                            rid      = r.get("result_id", "N/A")
+                            src_url  = r.get("source_url", "N/A")
+                            title    = r.get("page_title") or r.get("og_title") or "Not available"
+                            src_type = r.get("source_type") or "Public Website"
+                            is_gthumbnail = r.get("is_google_thumbnail", False)
+                            med_url  = r.get("media_url") or r.get("og_image") or "Not available"
+                            calc_val = r.get("calculated_similarity") or r.get("independent_similarity_score")
+                            sim_str  = f"{calc_val:.4f} ({calc_val*100:.1f}%)" if calc_val is not None else "Not calculated"
+                            vstatus  = r.get("verification_status", "Awaiting investigator review")
+                            sstatus  = r.get("scrape_status", "N/A")
+                            author   = r.get("author") or "Not publicly visible"
+                            pub_ts   = r.get("publication_timestamp") or "Not available"
+                            disc_ts  = r.get("discovery_timestamp") or r.get("retrieval_timestamp", "N/A")
+                            mtype    = r.get("provider_match_type", "N/A")
+                            method_str = r.get("independent_matching_method") or "pHash+aHash+dHash (independently calculated by DigitalShield)"
+                            ahash_d  = r.get("ahash_distance", "N/A")
+                            dhash_d  = r.get("dhash_distance", "N/A")
+                            phash_d  = r.get("phash_distance", "N/A")
+
+                            thumbnail_warning = ""
+                            if is_gthumbnail:
+                                thumbnail_warning = " ⚠ Google Thumbnail Cache — not the original publishing webpage"
+
+                            lines.append(f"| **Result ID** | `{rid}` |")
+                            lines.append(f"| **Platform** | {pname}{thumbnail_warning} |")
+                            lines.append(f"| **Source Type** | {src_type} |")
+                            lines.append(f"| **Page Title** | {title} |")
+                            if src_url != "N/A":
+                                lines.append(f"| **Original Webpage URL** | [{src_url}]({src_url}) |")
+                            else:
+                                lines.append("| **Original Webpage URL** | Original source webpage not identified |")
+                            if med_url != "Not available":
+                                lines.append(f"| **Discovered Image URL** | [{med_url}]({med_url}) |")
+                            else:
+                                lines.append("| **Discovered Image URL** | Not available |")
+                            lines.append(f"| **Author / Account** | {author} |")
+                            lines.append(f"| **Publication Date** | {pub_ts} |")
+                            lines.append(f"| **Discovery Timestamp (UTC)** | {disc_ts} |")
+                            lines.append(f"| **Provider Match Type** | {mtype} |")
+                            lines.append(f"| **Perceptual Similarity** | {sim_str} ({method_str}) |")
+                            lines.append(f"| **Hamming Distances** | aHash: {ahash_d}, dHash: {dhash_d}, pHash: {phash_d} |")
+                            lines.append(f"| **Verification Status** | {vstatus} |")
+                            lines.append(f"| **Page Accessibility** | {sstatus} |")
+                            lines.append("")
 
         lines.append(
             "> ⚠ **Limitation Statement:** Reverse image search results depend on the external provider's indexed "

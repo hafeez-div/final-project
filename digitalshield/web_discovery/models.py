@@ -27,8 +27,14 @@ class WebDiscoveryResult(BaseModel):
     page_title: Optional[str] = Field(default=None, description="Page title extracted from public HTML")
     domain: Optional[str] = Field(default=None, description="Domain of the source URL")
     media_url: Optional[str] = Field(default=None, description="Direct image/media URL if discovered")
+    thumbnail_url: Optional[str] = Field(default=None, description="Provider-returned thumbnail URL (may be Google-hosted cache)")
     canonical_url: Optional[str] = Field(default=None, description="Canonical page URL if declared")
     platform: Optional[str] = Field(default=None, description="Identifiable platform name (e.g. Instagram, Reddit)")
+    source_type: Optional[str] = Field(default=None, description="Source type (e.g. Social Media Post, News Article, Forum Post)")
+    is_google_thumbnail: bool = Field(default=False, description="True if source_url is a Google-hosted thumbnail, not an original publishing page")
+    author: Optional[str] = Field(default=None, description="Publicly visible author, account, or page name if available")
+    og_title: Optional[str] = Field(default=None, description="Open Graph title from page metadata")
+    og_image: Optional[str] = Field(default=None, description="Open Graph image URL from page metadata")
 
     # Provider-reported similarity type
     provider_match_type: str = Field(
@@ -95,6 +101,10 @@ class WebDiscoveryResult(BaseModel):
             d["provider_similarity"] = d["provider_score"]
         if "calculated_similarity" not in d and "independent_similarity_score" in d:
             d["calculated_similarity"] = d["independent_similarity_score"]
+        # Backwards compatibility: strip unknown fields that old records may not have
+        known = cls.model_fields.keys()
+        d = {k: v for k, v in d.items() if k in known or k in ("discovery_id",)}
+        d.pop("discovery_id", None)
         return cls(**d)
 
 
@@ -132,6 +142,8 @@ class WebDiscoverySession(BaseModel):
     failed_sources: int = Field(default=0, description="Sources that failed scraping or fetching")
 
     best_guess_labels: List[str] = Field(default_factory=list)
+    platform_counts: dict = Field(default_factory=dict, description="Count of results per identified platform")
+    distinct_platforms: int = Field(default=0, description="Number of distinct identified platforms")
     is_video_evidence: bool = Field(default=False)
     video_search_note: Optional[str] = Field(default=None)
     limitations: List[str] = Field(default_factory=list)
