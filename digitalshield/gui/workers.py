@@ -176,7 +176,7 @@ class ReportWorker(threading.Thread):
 
 class WebDiscoveryWorker(threading.Thread):
     """
-    Background worker that runs Google Cloud Vision Web Detection source discovery
+    Background worker that runs Google Lens reverse image discovery
     without freezing the Tkinter GUI thread.
 
     Emits messages to msg_queue:
@@ -184,7 +184,7 @@ class WebDiscoveryWorker(threading.Thread):
       {"type": "wd_complete", "session": <WebDiscoverySession dict>, "results": [<WebDiscoveryResult dict>, ...]}
       {"type": "wd_error", "error": <str>}
 
-    SECURITY: never logs or exposes the API key.
+    SECURITY: never logs or exposes API credentials.
     FORENSICS: never modifies original evidence.
     """
 
@@ -205,7 +205,7 @@ class WebDiscoveryWorker(threading.Thread):
             self.msg_queue.put({"type": "wd_start"})
             service = WebDiscoveryService(self.base_dir)
             session = service.run_search(self.evidence_id)
-            results = service.list_results_by_session(session.discovery_id)
+            results = service.list_results_by_session(session.session_id)
             self.msg_queue.put({
                 "type": "wd_complete",
                 "session": session.to_dict(),

@@ -336,14 +336,16 @@ class MarkdownRenderer:
         lines.append("")
 
         # --- Public Online Image Discovery and Reverse Image Search Findings ---
-        lines.append("# Public Online Image Discovery and Reverse Image Search Findings")
+        lines.append("## 10. Public Reverse Image Search Findings – Google Lens")
+        lines.append("### Public Online Image Discovery and Reverse Image Search Findings")
         lines.append("")
         lines.append(
             "Reverse image search results depend on the external provider's indexed and accessible content. "
-            "DigitalShield cannot guarantee discovery of every online occurrence. A missing result does not "
-            "establish that an image has never been published online. Perceptual hash similarity is an "
-            "investigative indicator and does not independently establish image identity, unauthorized "
-            "distribution, or the identity of an uploader."
+            "Google Lens does not provide an official standalone public developer API; automated discovery "
+            "operates via compliant search gateways. DigitalShield cannot guarantee discovery of every online "
+            "occurrence. A missing result does not establish that an image has never been published online. "
+            "Perceptual hash similarity is an investigative indicator and does not independently establish image "
+            "identity, unauthorized distribution, or the identity of an uploader."
         )
         lines.append("")
 
@@ -357,11 +359,18 @@ class MarkdownRenderer:
             for sess in sessions:
                 sid = sess.get("session_id") or sess.get("discovery_id", "N/A")
                 ev_id = sess.get("evidence_id", "N/A")
-                provider = sess.get("provider", "Google Cloud Vision Web Detection")
+                provider = sess.get("provider", "Google Lens")
                 status = sess.get("status", "N/A")
+                sub_status = sess.get("image_submission_status", "SUBMITTED")
+                dur = sess.get("search_duration_seconds")
+                dur_str = f"{dur:.3f}s" if dur is not None else "N/A"
                 started = sess.get("started_at") or sess.get("search_timestamp", "N/A")
                 completed = sess.get("completed_at") or "N/A"
-                total = sess.get("total_results", 0) or sess.get("total_candidates", 0)
+                total_webpages = sess.get("total_results", 0) or sess.get("total_candidates", 0)
+                total_images = sess.get("candidate_images_count", 0)
+                exact_matches = sess.get("exact_matches", 0)
+                high_matches = sess.get("high_similarity_matches", 0)
+                partial_matches = sess.get("partial_matches", 0)
                 verified = sess.get("verified_matches", 0)
                 unverified = sess.get("unverified_results", 0)
                 failed = sess.get("failed_sources", 0)
@@ -374,14 +383,19 @@ class MarkdownRenderer:
                 lines.append(f"| **Evidence ID** | {ev_id} |")
                 lines.append(f"| **Search Provider** | {provider} |")
                 lines.append(f"| **Search Status** | {status} |")
+                lines.append(f"| **Search Duration** | {dur_str} |")
+                lines.append(f"| **Image Submission Status** | `{sub_status}` |")
                 lines.append(f"| **Initiation Timestamp (UTC)** | {started} |")
                 lines.append(f"| **Completion Timestamp (UTC)** | {completed} |")
-                lines.append(f"| **Total Candidate Webpages Discovered** | {total} |")
-                lines.append(f"| **Total Verified Media Matches** | {verified} |")
-                lines.append(f"| **Total Unverified Search Results** | {unverified} |")
+                lines.append(f"| **Total Candidate Webpages Discovered** | {total_webpages} |")
+                lines.append(f"| **Total Candidate Images** | {total_images} |")
+                lines.append(f"| **Exact or Near-Exact Visual Matches** | {exact_matches} |")
+                lines.append(f"| **High Visual Similarity Matches** | {high_matches} |")
+                lines.append(f"| **Partial Visual Similarity Matches** | {partial_matches} |")
+                lines.append(f"| **Unverified Candidates** | {unverified} |")
                 lines.append(f"| **Failed Web Sources** | {failed} |")
                 if sess.get("error_message"):
-                    lines.append(f"| **Status Message** | {sess['error_message']} |")
+                    lines.append(f"| **Status / Error Message** | {sess['error_message']} |")
                 lines.append("")
 
                 sess_results = [
@@ -391,13 +405,23 @@ class MarkdownRenderer:
 
                 if not sess_results:
                     if status == "NO_RESULTS":
-                        lines.append("*Automatic reverse search completed: No candidate sources discovered.*")
-                    elif status == "MISSING_CREDENTIALS":
-                        lines.append("*Provider unavailable: GOOGLE_CLOUD_API_KEY environment variable is not configured.*")
-                    elif status == "FAILED":
-                        lines.append(f"*Search execution failed: {sess.get('error_message', 'Provider error')}.*")
+                        lines.append("*No matching public sources were discovered during the search.*")
+                    elif status in ("PROVIDER_UNAVAILABLE", "MISSING_CREDENTIALS"):
+                        lines.append(
+                            "> [!WARNING]\n"
+                            "> **Reverse Image Search Gateway Not Configured:** Google Lens does not provide an official "
+                            "unauthenticated public API. DigitalShield requires a configured gateway (SERPAPI_API_KEY, "
+                            "GOOGLE_LENS_API_KEY, or SEARCHAPI_API_KEY) in the environment or .env file to enable automated online discovery."
+                        )
+                    elif status == "BLOCKED":
+                        lines.append(
+                            "> [!WARNING]\n"
+                            "> **Reverse Image Search Blocked:** The external search gateway blocked the request or hit rate limits (HTTP 429)."
+                        )
+                    elif status in ("FAILED", "PARSE_ERROR"):
+                        lines.append(f"*Reverse search failed or provider unavailable: {sess.get('error_message', 'Provider error')}.*")
                     else:
-                        lines.append("*No candidate sources recorded for this session.*")
+                        lines.append("*No matching public sources were discovered during the search.*")
                     lines.append("")
                 else:
                     lines.append(f"### Discovered Sources & Verification Details ({len(sess_results)})")
@@ -410,7 +434,9 @@ class MarkdownRenderer:
                         med_url = r.get("media_url") or "Not available"
                         mtype = r.get("provider_match_type", "N/A")
                         prov_score = f"{r['provider_similarity']:.4f}" if r.get("provider_similarity") is not None else "N/A"
-                        calc_score = f"{r['calculated_similarity']:.4f}" if r.get("calculated_similarity") is not None else "Not calculated"
+                        calc_val = r.get("calculated_similarity") or r.get("independent_similarity_score")
+                        calc_score = f"{calc_val:.4f}" if calc_val is not None else "Not calculated"
+                        method_str = r.get("independent_matching_method") or "pHash+aHash+dHash (independently calculated by DigitalShield)"
                         ahash_d = r.get("ahash_distance", "N/A")
                         dhash_d = r.get("dhash_distance", "N/A")
                         phash_d = r.get("phash_distance", "N/A")
@@ -432,7 +458,7 @@ class MarkdownRenderer:
                         lines.append(f"| **Discovery Timestamp (UTC)** | {ts} |")
                         lines.append(f"| **Provider Match Type** | {mtype} (provider-reported) |")
                         lines.append(f"| **Provider Similarity** | {prov_score} |")
-                        lines.append(f"| **Independent Hash Similarity** | {calc_score} (pHash+aHash+dHash) |")
+                        lines.append(f"| **Independent Hash Similarity** | {calc_score} ({method_str}) |")
                         lines.append(f"| **Hamming Distances** | aHash: {ahash_d}, dHash: {dhash_d}, pHash: {phash_d} |")
                         lines.append(f"| **Verification Status** | {vstatus} |")
                         lines.append(f"| **Scraping Status** | {sstatus} |")

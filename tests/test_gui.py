@@ -89,8 +89,8 @@ class TestDesktopGUI(unittest.TestCase):
         step_dones = [m for m in messages if m.get("type") == "step_done"]
         complete_msgs = [m for m in messages if m.get("type") == "complete"]
 
-        self.assertEqual(len(step_starts), 6)
-        self.assertEqual(len(step_dones), 6)
+        self.assertEqual(len(step_starts), 7)
+        self.assertEqual(len(step_dones), 7)
         self.assertEqual(len(complete_msgs), 1)
 
         # Verify payload content

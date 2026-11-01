@@ -377,6 +377,7 @@ class HTMLRenderer:
         # --- Public Online Image Discovery and Reverse Image Search Findings ---
         doc.append("<div class='section'>")
         doc.append("<h1>Public Online Image Discovery and Reverse Image Search Findings</h1>")
+        doc.append("<p class='dim'>Public Reverse Image Search Findings &ndash; Google Lens</p>")
         doc.append(
             "<div class='callout'><p><strong>Forensic Disclaimer:</strong> Reverse image search results depend on the "
             "external provider's indexed and accessible content. DigitalShield cannot guarantee discovery of every online "
@@ -394,14 +395,22 @@ class HTMLRenderer:
             for sess in sessions:
                 sid = sess.get("session_id") or sess.get("discovery_id", "N/A")
                 ev_id = sess.get("evidence_id", "N/A")
-                provider = sess.get("provider", "Google Cloud Vision Web Detection")
+                provider = sess.get("provider", "Google Lens")
                 status = sess.get("status", "N/A")
                 started = sess.get("started_at") or sess.get("search_timestamp", "N/A")
                 completed = sess.get("completed_at") or "N/A"
-                total = sess.get("total_results", 0) or sess.get("total_candidates", 0)
+                total_webpages = sess.get("total_results", 0) or sess.get("total_candidates", 0)
+                total_images = sess.get("candidate_images_count", 0)
+                exact_matches = sess.get("exact_matches", 0)
+                high_matches = sess.get("high_similarity_matches", 0)
+                partial_matches = sess.get("partial_matches", 0)
                 verified = sess.get("verified_matches", 0)
                 unverified = sess.get("unverified_results", 0)
                 failed = sess.get("failed_sources", 0)
+
+                sub_status = sess.get("image_submission_status", "SUBMITTED")
+                dur = sess.get("search_duration_seconds")
+                dur_str = f"{dur:.3f}s" if dur is not None else "N/A"
 
                 doc.append(f"<h2>Session <code>{esc(sid)}</code> &mdash; Evidence <code>{esc(ev_id)}</code></h2>")
                 doc.append("<table>")
@@ -410,14 +419,19 @@ class HTMLRenderer:
                 doc.append(f"<tr><td>Evidence ID</td><td><code>{esc(ev_id)}</code></td></tr>")
                 doc.append(f"<tr><td>Search Provider</td><td>{esc(provider)}</td></tr>")
                 doc.append(f"<tr><td>Search Status</td><td><span class='badge'>{esc(status)}</span></td></tr>")
+                doc.append(f"<tr><td>Search Duration</td><td>{dur_str}</td></tr>")
+                doc.append(f"<tr><td>Image Submission Status</td><td><code>{esc(sub_status)}</code></td></tr>")
                 doc.append(f"<tr><td>Initiation Timestamp (UTC)</td><td><code>{esc(started)}</code></td></tr>")
                 doc.append(f"<tr><td>Completion Timestamp (UTC)</td><td><code>{esc(completed)}</code></td></tr>")
-                doc.append(f"<tr><td>Candidate Webpages Discovered</td><td><strong>{total}</strong></td></tr>")
-                doc.append(f"<tr><td>Verified Perceptual Matches</td><td><span style='color:green;'>{verified}</span></td></tr>")
-                doc.append(f"<tr><td>Unverified Search Results</td><td>{unverified}</td></tr>")
+                doc.append(f"<tr><td>Total Candidate Webpages</td><td><strong>{total_webpages}</strong></td></tr>")
+                doc.append(f"<tr><td>Total Candidate Images</td><td><strong>{total_images}</strong></td></tr>")
+                doc.append(f"<tr><td>Exact or Near-Exact Matches</td><td><span style='color:green;'>{exact_matches}</span></td></tr>")
+                doc.append(f"<tr><td>High Visual Similarity Matches</td><td>{high_matches}</td></tr>")
+                doc.append(f"<tr><td>Partial Visual Similarity Matches</td><td>{partial_matches}</td></tr>")
+                doc.append(f"<tr><td>Unverified Candidates</td><td>{unverified}</td></tr>")
                 doc.append(f"<tr><td>Failed Web Sources</td><td>{failed}</td></tr>")
                 if sess.get("error_message"):
-                    doc.append(f"<tr><td>Status Message</td><td><code>{esc(sess['error_message'])}</code></td></tr>")
+                    doc.append(f"<tr><td>Status / Error Message</td><td><code>{esc(sess['error_message'])}</code></td></tr>")
                 doc.append("</table>")
 
                 sess_results = [
@@ -427,21 +441,31 @@ class HTMLRenderer:
 
                 if not sess_results:
                     if status == "NO_RESULTS":
-                        doc.append("<p class='dim'>Automatic reverse search completed: No candidate sources discovered.</p>")
-                    elif status == "MISSING_CREDENTIALS":
-                        doc.append("<p class='dim'>Provider unavailable: GOOGLE_CLOUD_API_KEY environment variable is not configured.</p>")
-                    elif status == "FAILED":
-                        doc.append(f"<p class='dim'>Search execution failed: {esc(sess.get('error_message', 'Provider error'))}.</p>")
+                        doc.append("<p class='dim'>No matching public sources were discovered during the search.</p>")
+                    elif status in ("PROVIDER_UNAVAILABLE", "MISSING_CREDENTIALS"):
+                        doc.append(
+                            "<div class='alert-warning'><strong>Reverse Image Search Gateway Not Configured:</strong> "
+                            "Google Lens does not provide an official unauthenticated public API. Configure "
+                            "<code>SERPAPI_API_KEY</code>, <code>GOOGLE_LENS_API_KEY</code>, or "
+                            "<code>SEARCHAPI_API_KEY</code> in your environment or <code>.env</code> file to enable automated online discovery.</div>"
+                        )
+                    elif status == "BLOCKED":
+                        doc.append(
+                            "<div class='alert-warning'><strong>Reverse Image Search Blocked:</strong> "
+                            "External search gateway blocked the request or hit rate limits (HTTP 429).</div>"
+                        )
+                    elif status in ("FAILED", "PARSE_ERROR"):
+                        doc.append(f"<p class='dim'>Reverse search failed or provider unavailable: {esc(sess.get('error_message', 'Provider error'))}.</p>")
                     else:
-                        doc.append("<p class='dim'>No candidate sources recorded for this session.</p>")
+                        doc.append("<p class='dim'>No matching public sources were discovered during the search.</p>")
                 else:
                     doc.append(f"<h3>Discovered Sources & Verification Details ({len(sess_results)})</h3>")
                     doc.append("<table>")
-                    doc.append("<tr><th>Result ID</th><th>Platform</th><th>Webpage Title</th><th>Match Type</th><th>Similarity</th><th>Verification</th><th>Source Page</th><th>Candidate Image</th></tr>")
+                    doc.append("<tr><th>Result ID</th><th>Source Domain</th><th>Page Title</th><th>Match Classification</th><th>Similarity</th><th>Verification</th><th>Source Page</th><th>Candidate Image</th></tr>")
                     for r in sess_results:
                         rid = r.get("result_id", "N/A")
                         platform = r.get("platform") or r.get("domain") or "Web Source"
-                        mtype = r.get("provider_match_type", "N/A")
+                        mclass = r.get("match_classification") or r.get("provider_match_type", "N/A")
                         calc_sim = r.get("calculated_similarity") or r.get("independent_similarity_score")
                         sim_str = f"{calc_sim * 100:.1f}%" if calc_sim is not None else "Unverified"
                         vstatus = r.get("verification_status", "Awaiting review")
@@ -451,7 +475,7 @@ class HTMLRenderer:
                         surl_html = f"<a href='{esc(surl)}' rel='noopener noreferrer' target='_blank'><code>{esc(surl[:40])}...</code></a>" if surl else "N/A"
                         murl_html = f"<a href='{esc(murl)}' rel='noopener noreferrer' target='_blank'>View Media</a>" if murl else "<span class='dim'>N/A</span>"
 
-                        doc.append(f"<tr><td><code>{esc(rid)}</code></td><td><strong>{esc(platform)}</strong></td><td>{esc(r.get('page_title') or 'Not available')}</td><td>{esc(mtype)}</td><td><strong>{esc(sim_str)}</strong></td><td>{esc(vstatus)}</td><td>{surl_html}</td><td>{murl_html}</td></tr>")
+                        doc.append(f"<tr><td><code>{esc(rid)}</code></td><td><strong>{esc(platform)}</strong></td><td>{esc(r.get('page_title') or 'Not available')}</td><td>{esc(mclass)}</td><td><strong>{esc(sim_str)}</strong></td><td>{esc(vstatus)}</td><td>{surl_html}</td><td>{murl_html}</td></tr>")
                     doc.append("</table>")
         doc.append("</div>")
         doc.append("")

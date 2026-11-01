@@ -121,6 +121,8 @@ def enrich_page(
         "page_title": provided_title,
         "domain": domain,
         "media_url": None,
+        "publication_timestamp": None,
+        "http_status": None,
         "retrieval_timestamp": retrieval_timestamp,
         "retrieval_status": "PENDING",
         "notes": None,
@@ -136,6 +138,7 @@ def enrich_page(
 
     try:
         status_code, headers, content = client.fetch_public_url(validated_url)
+        result["http_status"] = status_code
     except ValueError as ve:
         msg = str(ve)
         if "Oversized" in msg:
@@ -167,6 +170,9 @@ def enrich_page(
                 titles = sel.css("title::text").getall()
                 if titles:
                     result["page_title"] = " ".join(titles).strip()[:200]
+                pub_times = sel.css("meta[property='article:published_time']::attr(content), time::attr(datetime)").getall()
+                if pub_times:
+                    result["publication_timestamp"] = pub_times[0].strip()
             except Exception:
                 # Fallback to existing SafePublicClient method
                 meta = client.extract_public_metadata(content, content_type)

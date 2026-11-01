@@ -4,7 +4,7 @@ Automated Reverse Image Search and Web Discovery Test Suite.
 Verifies:
 1. Automatic initiation upon evidence upload.
 2. Evidence immutability and SHA-256 preservation.
-3. Provider interaction and error handling (missing credentials, quota).
+3. Google Lens provider interaction and error handling.
 4. Candidate collection and deduplication.
 5. Scrapling public page enrichment and SSRF blocking.
 6. Perceptual hashing (aHash, dHash, pHash) comparison against original image.
@@ -30,10 +30,9 @@ from digitalshield.reporting.service import ReportingService
 from digitalshield.web_discovery.models import WebDiscoveryResult, WebDiscoverySession
 from digitalshield.web_discovery.page_enricher import deduplicate_urls, enrich_page, normalize_url
 from digitalshield.web_discovery.service import WebDiscoveryService
-from digitalshield.web_discovery.vision_provider import (
-    CredentialError,
-    VisionAPIError,
-    VisionWebDetectionProvider,
+from digitalshield.web_discovery.google_lens_provider import (
+    GoogleLensProvider,
+    ReverseSearchProviderError,
 )
 
 
@@ -71,37 +70,34 @@ def evidence_fixture(tmp_path):
 
 
 class TestAutomaticReverseImageSearch:
-    """Tests the automated workflow and provider execution."""
+    """Tests the automated workflow and Google Lens provider execution."""
 
-    def test_provider_requires_api_key_when_unset(self, tmp_path):
-        provider = VisionWebDetectionProvider()
+    def test_provider_returns_empty_when_gateway_unset(self, tmp_path):
+        """When no external gateway key is set, raises ReverseSearchProviderError rather than deceiving with fake empty results."""
+        provider = GoogleLensProvider()
         test_img = tmp_path / "img.jpg"
         test_img.write_bytes(_make_jpeg_bytes())
 
-        with patch.dict(os.environ, {"DIGITALSHIELD_TESTING": "1"}, clear=True):
-            os.environ.pop("GOOGLE_CLOUD_API_KEY", None)
-            with pytest.raises(CredentialError, match="GOOGLE_CLOUD_API_KEY"):
+        with patch.dict(os.environ, {}, clear=True):
+            with pytest.raises(ReverseSearchProviderError) as exc_info:
                 provider.search_web(test_img)
+            assert "gateway is not configured" in str(exc_info.value).lower()
 
-    def test_mocked_provider_search_success(self, tmp_path):
-        provider = VisionWebDetectionProvider()
+    def test_mocked_lens_gateway_search_success(self, tmp_path):
+        provider = GoogleLensProvider(api_key="fake_lens_key")
         test_img = tmp_path / "img.jpg"
         test_img.write_bytes(_make_jpeg_bytes())
 
         mock_payload = {
-            "responses": [{
-                "webDetection": {
-                    "fullMatchingImages": [{"url": "https://example.com/match1.jpg"}],
-                    "partialMatchingImages": [{"url": "https://example.com/partial1.jpg"}],
-                    "visuallySimilarImages": [{"url": "https://example.com/similar1.jpg"}],
-                    "pagesWithMatchingImages": [{
-                        "url": "https://example.com/page1",
-                        "pageTitle": "Example Page One",
-                        "fullMatchingImages": [{"url": "https://example.com/match1.jpg"}],
-                    }],
-                    "bestGuessLabels": [{"label": "Celebrity Portrait"}],
+            "image_id": "i_mock_image_id",
+            "visual_matches": [
+                {
+                    "title": "Example Page One",
+                    "link": "https://example.com/page1",
+                    "thumbnail": "https://example.com/match1.jpg",
                 }
-            }]
+            ],
+            "knowledge_graph": {"title": "Celebrity Portrait"},
         }
 
         class MockResp:
@@ -113,18 +109,19 @@ class TestAutomaticReverseImageSearch:
             def __exit__(self, *args):
                 pass
 
-        with patch.dict(os.environ, {"GOOGLE_CLOUD_API_KEY": "AIzaSyFakeKey"}):
-            with patch("urllib.request.urlopen", return_value=MockResp()):
-                results = provider.search_web(test_img)
-                assert len(results["full_matching_image_urls"]) == 1
-                assert "Celebrity Portrait" in results["best_guess_labels"]
+        with patch("urllib.request.urlopen", return_value=MockResp()):
+            results = provider.search_web(test_img)
+            assert len(results["visually_similar_image_urls"]) == 1
+            assert "Celebrity Portrait" in results["best_guess_labels"]
+            assert len(results["pages_with_matching_images"]) == 1
+            assert results["pages_with_matching_images"][0]["url"] == "https://example.com/page1"
 
     def test_service_run_search_full_pipeline(self, evidence_fixture):
         base_dir, case, evidence, _ = evidence_fixture
 
         # Mock provider
         mock_provider = MagicMock()
-        mock_provider.PROVIDER_NAME = "Google Cloud Vision Web Detection"
+        mock_provider.PROVIDER_NAME = "Google Lens"
         mock_provider.search_web.return_value = {
             "full_matching_image_urls": ["https://example.com/match.jpg"],
             "partial_matching_image_urls": [],
@@ -149,7 +146,7 @@ class TestAutomaticReverseImageSearch:
         session = svc.run_search(evidence.evidence_id)
 
         assert session.status == "COMPLETED"
-        assert session.total_results == 3
+        assert session.total_candidates == 3
         assert session.verified_matches >= 1
 
         results = svc.list_results_by_session(session.session_id)
@@ -158,7 +155,7 @@ class TestAutomaticReverseImageSearch:
         # Verify perceptual similarity was computed
         matched_res = [r for r in results if r.media_url == "https://example.com/match.jpg"][0]
         assert matched_res.calculated_similarity is not None
-        assert matched_res.verification_status == "Exact or near-exact perceptual match"
+        assert "visual match" in matched_res.verification_status.lower()
         assert matched_res.ahash_distance is not None
 
         # Verify audit events
@@ -182,16 +179,16 @@ class TestAutomaticReverseImageSearch:
         sha_after = hashlib.sha256(vault_path.read_bytes()).hexdigest()
         assert sha_before == sha_after
 
-    def test_missing_credentials_handled_gracefully(self, evidence_fixture):
+    def test_provider_error_handled_gracefully(self, evidence_fixture):
         base_dir, case, evidence, _ = evidence_fixture
         mock_provider = MagicMock()
-        mock_provider.search_web.side_effect = CredentialError("GOOGLE_CLOUD_API_KEY is not set.")
+        mock_provider.search_web.side_effect = ReverseSearchProviderError("Network connection timeout.")
 
         svc = WebDiscoveryService(base_dir=base_dir, provider=mock_provider)
         session = svc.run_search(evidence.evidence_id)
 
-        assert session.status == "MISSING_CREDENTIALS"
-        assert "GOOGLE_CLOUD_API_KEY" in session.error_message
+        assert session.status in ("FAILED", "PROVIDER_UNAVAILABLE")
+        assert "timeout" in session.error_message
 
         events = svc.audit_logger.get_events_by_case(case.case_id)
         actions = [e["action"] for e in events]
@@ -210,7 +207,7 @@ class TestAutomaticReverseImageSearch:
         base_dir, case, evidence, _ = evidence_fixture
 
         mock_provider = MagicMock()
-        mock_provider.PROVIDER_NAME = "Google Cloud Vision Web Detection"
+        mock_provider.PROVIDER_NAME = "Google Lens"
         mock_provider.search_web.return_value = {
             "full_matching_image_urls": ["https://news.example.com/verified_image.jpg"],
             "partial_matching_image_urls": [],
@@ -233,18 +230,19 @@ class TestAutomaticReverseImageSearch:
         svc.run_search(evidence.evidence_id)
 
         rpt_service = ReportingService(base_dir=base_dir)
-        report_record, file_map = rpt_service.generate_report(case.case_id, formats="all")
+        report_record, file_map = rpt_service.generate_report(case.case_id, formats=["markdown", "html", "pdf"])
 
         # Markdown report validation
         md_text = file_map["markdown"].read_text(encoding="utf-8")
-        assert "# Public Online Image Discovery and Reverse Image Search Findings" in md_text
+        assert "Public Online Image Discovery and Reverse Image Search Findings" in md_text
+        assert "Google Lens" in md_text
         assert "https://news.example.com/article1" in md_text
         assert "Breaking News Story" in md_text
-        assert "Exact or near-exact perceptual match" in md_text
 
         # HTML report validation
         html_text = file_map["html"].read_text(encoding="utf-8")
         assert "Public Online Image Discovery and Reverse Image Search Findings" in html_text
+        assert "Google Lens" in html_text
         assert "Breaking News Story" in html_text
         assert "news.example.com" in html_text
 

@@ -105,18 +105,29 @@ class WebDiscoverySession(BaseModel):
     session_id: str = Field(description="Unique session ID (e.g. WDS-2026-000001)")
     case_id: str = Field(description="Associated case ID")
     evidence_id: str = Field(description="Associated evidence ID")
-    provider: str = Field(default="Google Cloud Vision Web Detection")
+    provider: str = Field(default="Google Lens")
     started_at: str = Field(description="ISO 8601 UTC timestamp when search started")
     completed_at: Optional[str] = Field(default=None, description="ISO 8601 UTC timestamp when completed")
+    search_duration_seconds: Optional[float] = Field(default=None, description="Elapsed search duration in seconds")
+    image_submission_status: str = Field(
+        default="SUBMITTED",
+        description="Submission status: SUBMITTED, SUBMITTED_AND_SEARCHED, NOT_SUBMITTED_NO_GATEWAY, "
+                    "NOT_SUBMITTED_INVALID_FORMAT, NOT_SUBMITTED_VIDEO, SUBMISSION_FAILED, SUBMISSION_BLOCKED"
+    )
 
     status: str = Field(
         default="COMPLETED",
-        description="Session status: COMPLETED, FAILED, NO_RESULTS, MISSING_CREDENTIALS, PARTIAL"
+        description="Session status: COMPLETED, FAILED, NO_RESULTS, PROVIDER_UNAVAILABLE, "
+                    "MISSING_CREDENTIALS, BLOCKED, INVALID_IMAGE, PARSE_ERROR, PARTIAL"
     )
     error_message: Optional[str] = Field(default=None, description="Error message if session failed")
 
     total_results: int = Field(default=0, description="Total candidate pages discovered")
+    candidate_images_count: int = Field(default=0, description="Total candidate images discovered")
     verified_matches: int = Field(default=0, description="Number of verified perceptual matches")
+    exact_matches: int = Field(default=0, description="Exact or near-exact matches")
+    high_similarity_matches: int = Field(default=0, description="High visual similarity matches")
+    partial_matches: int = Field(default=0, description="Partial visual similarity matches")
     unverified_results: int = Field(default=0, description="Unverified results (e.g. page without media)")
     failed_sources: int = Field(default=0, description="Sources that failed scraping or fetching")
 

@@ -218,7 +218,7 @@ class ResultsScreen(ttk.Frame):
 
         self._provider_lbl = ttk.Label(
             self._metrics_frame,
-            text="Provider: Google Cloud Vision Web Detection",
+            text="Provider: Google Lens",
             style="CardMuted.TLabel",
             font=Fonts.SMALL_BOLD,
         )
@@ -420,7 +420,7 @@ class ResultsScreen(ttk.Frame):
             return
 
         status = session.get("status", "UNKNOWN")
-        provider = session.get("provider", "Google Cloud Vision Web Detection")
+        provider = session.get("provider", "Google Lens")
         started = (session.get("started_at") or session.get("search_timestamp") or "")[:19]
         completed = (session.get("completed_at") or "")[:19] or "In progress"
 
@@ -431,10 +431,11 @@ class ResultsScreen(ttk.Frame):
 
         # Status text styling
         status_fg = Colors.SUCCESS if status == "COMPLETED" else (
-            Colors.WARNING if status in ("NO_RESULTS", "MISSING_CREDENTIALS") else Colors.DANGER
+            Colors.WARNING if status in ("NO_RESULTS", "MISSING_CREDENTIALS", "PROVIDER_UNAVAILABLE") else Colors.DANGER
         )
-        if status == "MISSING_CREDENTIALS":
-            status_text = "Status: Provider Unavailable (Missing GOOGLE_CLOUD_API_KEY)"
+        if status in ("MISSING_CREDENTIALS", "PROVIDER_UNAVAILABLE"):
+            err = session.get("error_message") or "Provider credentials or gateway unavailable"
+            status_text = f"Status: Provider Unavailable ({err[:45]})"
         elif status == "FAILED":
             err = session.get("error_message") or "Provider execution error"
             status_text = f"Status: Failed ({err[:50]})"

@@ -439,25 +439,39 @@ class PDFRenderer:
         # --- Section 10: Public Online Image Discovery and Reverse Image Search Findings ---
         sessions = getattr(report, "web_discovery_sessions", []) or []
         wd_results = getattr(report, "web_discovery_results", []) or []
-        if sessions:
-            story.append(Paragraph("10. Public Online Image Discovery and Reverse Image Search Findings", h2_style))
-            story.append(Paragraph(
-                "Reverse image search results depend on the external provider's indexed and accessible content. "
-                "DigitalShield cannot guarantee discovery of every online occurrence. Perceptual hash similarity "
-                "is an investigative indicator and does not independently establish image identity, unauthorized "
-                "distribution, or the identity of an uploader.",
-                warning_style
-            ))
-            story.append(Spacer(1, 4))
+        story.append(Paragraph("10. Public Online Image Discovery and Reverse Image Search Findings", h2_style))
+        story.append(Paragraph(
+            "Reverse image search results depend on the external provider's indexed and accessible content. "
+            "DigitalShield cannot guarantee discovery of every online occurrence. Perceptual hash similarity "
+            "is an investigative indicator and does not independently establish image identity, unauthorized "
+            "distribution, or the identity of an uploader.",
+            warning_style,
+        ))
+        story.append(Spacer(1, 4))
+
+        if not sessions:
+            story.append(Paragraph("No reverse image search or public web discovery sessions have been executed for this case.", callout_style))
+            story.append(Spacer(1, 6))
+        else:
+            import html as pyhtml
             for sess in sessions:
                 sid = sess.get("session_id") or sess.get("discovery_id", "N/A")
                 ev_id = sess.get("evidence_id", "N/A")
                 status = sess.get("status", "N/A")
                 started = sess.get("started_at") or sess.get("search_timestamp", "N/A")
                 completed = sess.get("completed_at") or "N/A"
-                provider = sess.get("provider", "Google Cloud Vision Web Detection")
-                total = sess.get("total_results", 0) or sess.get("total_candidates", 0)
-                verified = sess.get("verified_matches", 0)
+                provider = sess.get("provider", "Google Lens")
+                sub_status = sess.get("image_submission_status", "SUBMITTED")
+                dur = sess.get("search_duration_seconds")
+                if dur is not None:
+                    dur_str = f"{dur:.3f}s"
+                else:
+                    dur_str = "N/A"
+                total_webpages = sess.get("total_results", 0) or sess.get("total_candidates", 0)
+                total_images = sess.get("candidate_images_count", 0)
+                exact_matches = sess.get("exact_matches", 0)
+                high_matches = sess.get("high_similarity_matches", 0)
+                partial_matches = sess.get("partial_matches", 0)
                 unverified = sess.get("unverified_results", 0)
                 failed = sess.get("failed_sources", 0)
 
@@ -465,57 +479,121 @@ class PDFRenderer:
                 sess_rows = [
                     [Paragraph("Search Provider:", meta_label), Paragraph(str(provider), body_style)],
                     [Paragraph("Search Status:", meta_label), Paragraph(str(status), body_style)],
-                    [Paragraph("Initiated (UTC):", meta_label), Paragraph(str(started), body_style)],
-                    [Paragraph("Completed (UTC):", meta_label), Paragraph(str(completed), body_style)],
-                    [Paragraph("Candidate Webpages Discovered:", meta_label), Paragraph(str(total), body_style)],
-                    [Paragraph("Verified Perceptual Matches:", meta_label), Paragraph(str(verified), body_style)],
-                    [Paragraph("Unverified Search Results:", meta_label), Paragraph(str(unverified), body_style)],
+                    [Paragraph("Search Duration:", meta_label), Paragraph(dur_str, body_style)],
+                    [Paragraph("Image Submission Status:", meta_label), Paragraph(str(sub_status), code_style)],
+                    [Paragraph("Search Initiation Timestamp (UTC):", meta_label), Paragraph(str(started), body_style)],
+                    [Paragraph("Search Completion Timestamp (UTC):", meta_label), Paragraph(str(completed), body_style)],
+                    [Paragraph("Original Evidence ID:", meta_label), Paragraph(str(ev_id), code_style)],
+                    [Paragraph("Total Candidate Webpages:", meta_label), Paragraph(str(total_webpages), body_style)],
+                    [Paragraph("Total Candidate Images:", meta_label), Paragraph(str(total_images), body_style)],
+                    [Paragraph("Exact or Near-Exact Visual Matches:", meta_label), Paragraph(str(exact_matches), body_style)],
+                    [Paragraph("High Visual Similarity Matches:", meta_label), Paragraph(str(high_matches), body_style)],
+                    [Paragraph("Partial Visual Similarity Matches:", meta_label), Paragraph(str(partial_matches), body_style)],
+                    [Paragraph("Unverified Candidates:", meta_label), Paragraph(str(unverified), body_style)],
                     [Paragraph("Failed Web Sources:", meta_label), Paragraph(str(failed), body_style)],
                 ]
-                t_sess = Table(sess_rows, colWidths=[160, 344])
+                if sess.get("error_message"):
+                    sess_rows.append([
+                        Paragraph("Status / Error Message:", meta_label),
+                        Paragraph(str(sess["error_message"]), warning_style),
+                    ])
+
+                t_sess = Table(sess_rows, colWidths=[200, 304])
                 t_sess.setStyle(TableStyle([
                     ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#e2e8f0")),
                     ("TOPPADDING", (0, 0), (-1, -1), 2.5),
                     ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
                 ]))
                 story.append(t_sess)
-                story.append(Spacer(1, 4))
+                story.append(Spacer(1, 6))
 
                 sess_results = [
                     r for r in wd_results
                     if r.get("session_id") == sid or r.get("discovery_id") == sid
                 ]
+
                 if not sess_results:
-                    story.append(Paragraph("No candidate sources recorded for this session.", callout_style))
+                    if status == "NO_RESULTS":
+                        story.append(Paragraph("No matching public sources were discovered during the search.", callout_style))
+                    elif status in ("PROVIDER_UNAVAILABLE", "MISSING_CREDENTIALS"):
+                        story.append(Paragraph(
+                            "Reverse Image Search Gateway Not Configured: Google Lens does not provide an official "
+                            "unauthenticated public API. Configure SERPAPI_API_KEY, GOOGLE_LENS_API_KEY, or "
+                            "SEARCHAPI_API_KEY in your environment or .env file to enable automated online discovery.",
+                            warning_style
+                        ))
+                    elif status == "BLOCKED":
+                        story.append(Paragraph(
+                            "Reverse Image Search Request Blocked: External search gateway blocked the request "
+                            "or hit rate limits (HTTP 429). Please verify credentials or retry later.",
+                            warning_style
+                        ))
+                    elif status in ("FAILED", "PARSE_ERROR"):
+                        err_msg = sess.get("error_message") or "Reverse image search failed or provider returned an unparseable response."
+                        story.append(Paragraph(f"Reverse search failure: {err_msg}", warning_style))
+                    else:
+                        story.append(Paragraph("No matching public sources were discovered during the search.", callout_style))
                 else:
+                    # Candidate Results Table
+                    story.append(Paragraph("Candidate Results Table", h3_style))
+                    tbl_data = [[
+                        Paragraph("Source Domain", body_bold),
+                        Paragraph("Page Title", body_bold),
+                        Paragraph("Webpage URL", body_bold),
+                        Paragraph("Discovered Image URL", body_bold),
+                        Paragraph("Similarity", body_bold),
+                        Paragraph("Match Classification", body_bold),
+                        Paragraph("Status", body_bold),
+                    ]]
+
                     for r in sess_results:
-                        rid = r.get("result_id", "N/A")
                         platform = r.get("platform") or r.get("domain") or "Web Source"
-                        mtype = r.get("provider_match_type", "N/A")
-                        src_url = r.get("source_url", "N/A")
-                        med_url = r.get("media_url") or "Not available"
+                        page_title = r.get("page_title") or "Not available"
+                        src_url = r.get("source_url") or "N/A"
+                        med_url = r.get("media_url") or "N/A"
+
                         calc_sim = r.get("calculated_similarity") or r.get("independent_similarity_score")
                         sim_str = f"{calc_sim * 100:.1f}%" if calc_sim is not None else "Unverified"
-                        vstatus = r.get("verification_status", "Awaiting review")
 
-                        story.append(Paragraph(f"Discovered Source {rid} — {platform} ({vstatus})", h3_style))
-                        r_rows = [
-                            [Paragraph("Platform / Domain:", meta_label), Paragraph(str(platform), body_style)],
-                            [Paragraph("Webpage Title:", meta_label), Paragraph(str(r.get("page_title") or "Not available"), body_style)],
-                            [Paragraph("Source Webpage URL:", meta_label), Paragraph(src_url[:120], code_style)],
-                            [Paragraph("Candidate Image URL:", meta_label), Paragraph(med_url[:120], code_style)],
-                            [Paragraph("Provider Match Type:", meta_label), Paragraph(str(mtype), body_style)],
-                            [Paragraph("Perceptual Similarity:", meta_label), Paragraph(str(sim_str), body_style)],
-                            [Paragraph("Verification Status:", meta_label), Paragraph(str(vstatus), body_style)],
-                        ]
-                        t_r = Table(r_rows, colWidths=[160, 344])
-                        t_r.setStyle(TableStyle([
-                            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#e2e8f0")),
-                            ("TOPPADDING", (0, 0), (-1, -1), 2.5),
-                            ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
-                        ]))
-                        story.append(t_r)
-                        story.append(Spacer(1, 3))
+                        mclass = r.get("match_classification") or r.get("provider_match_type") or "SIMILAR"
+                        vstatus = r.get("verification_status") or r.get("status") or "Discovered"
+
+                        # Clickable links
+                        if src_url and src_url != "N/A":
+                            esc_src = pyhtml.escape(src_url, quote=True)
+                            disp_src = pyhtml.escape(src_url[:22] + "..." if len(src_url) > 22 else src_url)
+                            src_p = Paragraph(f'<a href="{esc_src}"><font color="#1d4ed8"><u>{disp_src}</u></font></a>', code_style)
+                        else:
+                            src_p = Paragraph("N/A", code_style)
+
+                        if med_url and med_url != "N/A" and med_url != "Not available":
+                            esc_med = pyhtml.escape(med_url, quote=True)
+                            disp_med = pyhtml.escape(med_url[:18] + "..." if len(med_url) > 18 else med_url)
+                            med_p = Paragraph(f'<a href="{esc_med}"><font color="#1d4ed8"><u>{disp_med}</u></font></a>', code_style)
+                        else:
+                            med_p = Paragraph("N/A", code_style)
+
+                        tbl_data.append([
+                            Paragraph(str(platform), body_style),
+                            Paragraph(page_title[:28] + "..." if len(page_title) > 28 else page_title, body_style),
+                            src_p,
+                            med_p,
+                            Paragraph(str(sim_str), body_style),
+                            Paragraph(str(mclass), body_style),
+                            Paragraph(str(vstatus), body_style),
+                        ])
+
+                    t_cand = Table(tbl_data, colWidths=[65, 75, 95, 85, 48, 76, 60])
+                    t_cand.setStyle(TableStyle([
+                        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f1f5f9")),
+                        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#e2e8f0")),
+                        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                        ("TOPPADDING", (0, 0), (-1, -1), 2.5),
+                        ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
+                    ]))
+                    story.append(t_cand)
+
+                story.append(Spacer(1, 6))
             story.append(Spacer(1, 6))
 
         # --- Section 10: Findings & Limitations ---

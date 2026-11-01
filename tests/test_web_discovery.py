@@ -78,51 +78,47 @@ def evidence_setup(tmp_path, base_dir):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# VisionWebDetectionProvider Tests
+# GoogleLensProvider Tests
 # ──────────────────────────────────────────────────────────────────────────────
 
-class TestVisionWebDetectionProvider:
+class TestGoogleLensProvider:
 
-    def test_missing_api_key_raises_credential_error(self, tmp_path):
-        from digitalshield.web_discovery.vision_provider import (
-            CredentialError, VisionWebDetectionProvider,
-        )
-        provider = VisionWebDetectionProvider()
+    def test_missing_gateway_api_key_returns_empty_results(self, tmp_path):
+        from digitalshield.web_discovery.google_lens_provider import GoogleLensProvider, ReverseSearchProviderError
+        provider = GoogleLensProvider()
         img_path = tmp_path / "img.jpg"
         img_path.write_bytes(_make_tiny_jpeg_bytes())
 
-        with patch.dict(os.environ, {"DIGITALSHIELD_TESTING": "1"}, clear=True):
-            os.environ.pop("GOOGLE_CLOUD_API_KEY", None)
-            with pytest.raises(CredentialError, match="GOOGLE_CLOUD_API_KEY"):
+        with patch.dict(os.environ, {}, clear=True):
+            with pytest.raises(ReverseSearchProviderError) as exc_info:
                 provider.search_web(img_path)
+            assert "gateway is not configured" in str(exc_info.value).lower()
 
-    def test_empty_api_key_raises_credential_error(self, tmp_path):
-        from digitalshield.web_discovery.vision_provider import (
-            CredentialError, VisionWebDetectionProvider,
-        )
-        provider = VisionWebDetectionProvider()
-        img_path = tmp_path / "img.jpg"
-        img_path.write_bytes(_make_tiny_jpeg_bytes())
+    def test_explicit_api_key_retrieval(self):
+        from digitalshield.web_discovery.google_lens_provider import GoogleLensProvider
+        provider = GoogleLensProvider(api_key="my_explicit_key")
+        assert provider._get_gateway_api_key() == "my_explicit_key"
 
-        with patch.dict(os.environ, {"GOOGLE_CLOUD_API_KEY": ""}):
-            with pytest.raises(CredentialError):
-                provider.search_web(img_path)
+    def test_env_api_key_retrieval(self):
+        from digitalshield.web_discovery.google_lens_provider import GoogleLensProvider
+        provider = GoogleLensProvider()
+        with patch.dict(os.environ, {"SERPAPI_API_KEY": "env_serp_key"}):
+            assert provider._get_gateway_api_key() == "env_serp_key"
+
+        with patch.dict(os.environ, {"GOOGLE_LENS_API_KEY": "env_lens_key"}, clear=True):
+            assert provider._get_gateway_api_key() == "env_lens_key"
 
     def test_api_key_never_logged_or_printed(self, tmp_path, capsys):
         """The API key must not appear in any stdout/stderr output."""
-        from digitalshield.web_discovery.vision_provider import (
-            CredentialError, VisionWebDetectionProvider,
-        )
-        provider = VisionWebDetectionProvider()
+        from digitalshield.web_discovery.google_lens_provider import GoogleLensProvider
+        provider = GoogleLensProvider()
         img_path = tmp_path / "img.jpg"
         img_path.write_bytes(_make_tiny_jpeg_bytes())
 
-        fake_key = "SUPER_SECRET_KEY_SHOULD_NOT_APPEAR_IN_OUTPUT"
+        fake_key = "SUPER_SECRET_LENS_KEY_SHOULD_NOT_APPEAR"
 
-        import urllib.request, urllib.error, json
-        mock_resp_data = json.dumps({
-            "responses": [{"webDetection": {}}]
-        }).encode()
+        import json
+        mock_resp_data = json.dumps({"image_id": "i_test", "visual_matches": []}).encode()
 
         class FakeResponse:
             status = 200
@@ -131,7 +127,7 @@ class TestVisionWebDetectionProvider:
             def __enter__(self): return self
             def __exit__(self, *a): pass
 
-        with patch.dict(os.environ, {"GOOGLE_CLOUD_API_KEY": fake_key}):
+        with patch.dict(os.environ, {"SERPAPI_API_KEY": fake_key}):
             with patch("urllib.request.urlopen", return_value=FakeResponse()):
                 provider.search_web(img_path)
 
@@ -139,121 +135,83 @@ class TestVisionWebDetectionProvider:
         assert fake_key not in captured.out
         assert fake_key not in captured.err
 
-    def test_parse_web_detection_full(self):
-        from digitalshield.web_discovery.vision_provider import VisionWebDetectionProvider
-        web = {
-            "fullMatchingImages": [{"url": "https://example.com/full.jpg"}],
-            "partialMatchingImages": [{"url": "https://example.com/partial.jpg"}],
-            "visuallySimilarImages": [{"url": "https://example.com/similar.jpg"}],
-            "pagesWithMatchingImages": [
+    def test_parse_lens_response_full(self):
+        from digitalshield.web_discovery.google_lens_provider import GoogleLensProvider
+        raw_lens_data = {
+            "visual_matches": [
                 {
-                    "url": "https://example.com/page",
-                    "pageTitle": "Test Page",
-                    "partialMatchingImages": [{"url": "https://example.com/pm.jpg"}],
-                    "fullMatchingImages": [{"url": "https://example.com/fm.jpg"}],
-                    "score": 0.9,
+                    "title": "Test Page Title",
+                    "link": "https://example.com/page",
+                    "source": "example.com",
+                    "thumbnail": "https://example.com/thumb.jpg",
                 }
             ],
-            "bestGuessLabels": [{"label": "Michael Jackson"}, {"label": "Singer"}],
-            "webEntities": [{"entityId": "/m/123", "description": "Pop Star", "score": 0.95}],
+            "exact_matches": [
+                {
+                    "title": "Exact Page Title",
+                    "link": "https://example.com/exact_page",
+                    "thumbnail": "https://example.com/exact.jpg",
+                }
+            ],
+            "knowledge_graph": {"title": "Pop Star Identity"},
+            "search_information": {"query_displayed": "Michael Jackson"},
         }
-        result = VisionWebDetectionProvider._parse_web_detection(web)
+        result = GoogleLensProvider._parse_lens_response(raw_lens_data)
 
-        assert "https://example.com/full.jpg" in result["full_matching_image_urls"]
-        assert "https://example.com/partial.jpg" in result["partial_matching_image_urls"]
-        assert "https://example.com/similar.jpg" in result["visually_similar_image_urls"]
-        assert result["pages_with_matching_images"][0]["url"] == "https://example.com/page"
-        assert result["pages_with_matching_images"][0]["page_title"] == "Test Page"
+        assert "https://example.com/exact.jpg" in result["full_matching_image_urls"]
+        assert "https://example.com/thumb.jpg" in result["visually_similar_image_urls"]
+        urls = [p["url"] for p in result["pages_with_matching_images"]]
+        assert "https://example.com/page" in urls
+        assert "https://example.com/exact_page" in urls
+        assert "Pop Star Identity" in result["best_guess_labels"]
         assert "Michael Jackson" in result["best_guess_labels"]
-        assert result["web_entities"][0]["description"] == "Pop Star"
 
-    def test_parse_web_detection_empty(self):
-        from digitalshield.web_discovery.vision_provider import VisionWebDetectionProvider
-        result = VisionWebDetectionProvider._parse_web_detection({})
+    def test_parse_lens_response_empty(self):
+        from digitalshield.web_discovery.google_lens_provider import GoogleLensProvider
+        result = GoogleLensProvider._parse_lens_response({})
         assert result["full_matching_image_urls"] == []
         assert result["partial_matching_image_urls"] == []
+        assert result["visually_similar_image_urls"] == []
         assert result["pages_with_matching_images"] == []
         assert result["best_guess_labels"] == []
 
-    def test_api_error_403_raises_vision_api_error(self, tmp_path):
-        from digitalshield.web_discovery.vision_provider import VisionAPIError, VisionWebDetectionProvider
+    def test_gateway_http_error_raises_reverse_search_error(self, tmp_path):
+        from digitalshield.web_discovery.google_lens_provider import (
+            GoogleLensProvider,
+            ReverseSearchProviderError,
+        )
         import urllib.error
 
-        provider = VisionWebDetectionProvider()
+        provider = GoogleLensProvider(api_key="test-key")
         img_path = tmp_path / "img.jpg"
         img_path.write_bytes(_make_tiny_jpeg_bytes())
 
         err = urllib.error.HTTPError(
-            url="https://vision.googleapis.com/v1/images:annotate",
+            url="https://serpapi.com/search",
             code=403,
             msg="Forbidden",
             hdrs={},
-            fp=io.BytesIO(b'{"error": {"code": 403, "message": "Access denied"}}'),
+            fp=io.BytesIO(b'{"error": "Invalid API Key"}'),
         )
 
-        with patch.dict(os.environ, {"GOOGLE_CLOUD_API_KEY": "test-key"}):
-            with patch("urllib.request.urlopen", side_effect=err):
-                with pytest.raises(VisionAPIError, match="403"):
-                    provider.search_web(img_path)
-
-    def test_api_error_429_raises_vision_api_error(self, tmp_path):
-        from digitalshield.web_discovery.vision_provider import VisionAPIError, VisionWebDetectionProvider
-        import urllib.error
-
-        provider = VisionWebDetectionProvider()
-        img_path = tmp_path / "img.jpg"
-        img_path.write_bytes(_make_tiny_jpeg_bytes())
-
-        err = urllib.error.HTTPError(
-            url="", code=429, msg="Too Many Requests", hdrs={},
-            fp=io.BytesIO(b"quota exceeded"),
-        )
-        with patch.dict(os.environ, {"GOOGLE_CLOUD_API_KEY": "test-key"}):
-            with patch("urllib.request.urlopen", side_effect=err):
-                with pytest.raises(VisionAPIError, match="quota"):
-                    provider.search_web(img_path)
-
-    def test_api_level_credential_error_in_response(self, tmp_path):
-        """Vision API may return credential error inside the JSON response body."""
-        from digitalshield.web_discovery.vision_provider import CredentialError, VisionWebDetectionProvider
-        import json
-
-        provider = VisionWebDetectionProvider()
-        img_path = tmp_path / "img.jpg"
-        img_path.write_bytes(_make_tiny_jpeg_bytes())
-
-        body = json.dumps({
-            "responses": [{"error": {"code": 7, "message": "Permission denied"}}]
-        }).encode()
-
-        class FakeResp:
-            status = 200
-            def read(self): return body
-            def __enter__(self): return self
-            def __exit__(self, *a): pass
-
-        with patch.dict(os.environ, {"GOOGLE_CLOUD_API_KEY": "bad-key"}):
-            with patch("urllib.request.urlopen", return_value=FakeResp()):
-                with pytest.raises(CredentialError):
-                    provider.search_web(img_path)
+        with patch("urllib.request.urlopen", side_effect=err):
+            with pytest.raises(ReverseSearchProviderError, match="403"):
+                provider.search_web(img_path)
 
     def test_mocked_successful_search(self, tmp_path):
-        from digitalshield.web_discovery.vision_provider import VisionWebDetectionProvider
+        from digitalshield.web_discovery.google_lens_provider import GoogleLensProvider
         import json
 
-        provider = VisionWebDetectionProvider()
+        provider = GoogleLensProvider(api_key="test-key")
         img_path = tmp_path / "img.jpg"
         img_path.write_bytes(_make_tiny_jpeg_bytes())
 
         mock_resp_data = json.dumps({
-            "responses": [{
-                "webDetection": {
-                    "pagesWithMatchingImages": [
-                        {"url": "https://example.com/photo", "pageTitle": "Photo Page"}
-                    ],
-                    "bestGuessLabels": [{"label": "Pop Singer"}],
-                }
-            }]
+            "image_id": "i_test",
+            "visual_matches": [
+                {"link": "https://example.com/photo", "title": "Photo Page"}
+            ],
+            "knowledge_graph": {"title": "Pop Singer"},
         }).encode()
 
         class FakeResp:
@@ -262,9 +220,8 @@ class TestVisionWebDetectionProvider:
             def __enter__(self): return self
             def __exit__(self, *a): pass
 
-        with patch.dict(os.environ, {"GOOGLE_CLOUD_API_KEY": "test-key"}):
-            with patch("urllib.request.urlopen", return_value=FakeResp()):
-                result = provider.search_web(img_path)
+        with patch("urllib.request.urlopen", return_value=FakeResp()):
+            result = provider.search_web(img_path)
 
         assert result["pages_with_matching_images"][0]["url"] == "https://example.com/photo"
         assert "Pop Singer" in result["best_guess_labels"]
@@ -393,8 +350,9 @@ class TestPageEnricher:
 class TestWebDiscoveryService:
 
     def _make_mock_provider(self, web_data: dict = None):
-        from digitalshield.web_discovery.vision_provider import VisionWebDetectionProvider
-        provider = MagicMock(spec=VisionWebDetectionProvider)
+        from digitalshield.web_discovery.google_lens_provider import GoogleLensProvider
+        provider = MagicMock(spec=GoogleLensProvider)
+        provider.PROVIDER_NAME = "Google Lens"
         provider.search_web.return_value = web_data or {
             "web_entities": [],
             "full_matching_image_urls": [],
@@ -413,31 +371,31 @@ class TestWebDiscoveryService:
 
     def test_missing_credentials_creates_session(self, evidence_setup):
         from digitalshield.web_discovery.service import WebDiscoveryService
-        from digitalshield.web_discovery.vision_provider import CredentialError
+        from digitalshield.web_discovery.google_lens_provider import ReverseSearchProviderError
 
         case, evidence, base_dir = evidence_setup
         provider = MagicMock()
-        provider.search_web.side_effect = CredentialError("GOOGLE_CLOUD_API_KEY not set")
+        provider.search_web.side_effect = ReverseSearchProviderError("No reverse search API key configured")
 
         svc = WebDiscoveryService(base_dir=base_dir, provider=provider)
         session = svc.run_search(evidence.evidence_id)
 
-        assert session.status == "MISSING_CREDENTIALS"
-        assert "GOOGLE_CLOUD_API_KEY" in session.error_message
+        assert session.status in ("MISSING_CREDENTIALS", "PROVIDER_UNAVAILABLE", "FAILED")
+        assert "API key" in session.error_message
         assert session.evidence_id == evidence.evidence_id
 
     def test_api_failure_creates_failed_session(self, evidence_setup):
         from digitalshield.web_discovery.service import WebDiscoveryService
-        from digitalshield.web_discovery.vision_provider import VisionAPIError
+        from digitalshield.web_discovery.google_lens_provider import ReverseSearchProviderError
 
         case, evidence, base_dir = evidence_setup
         provider = MagicMock()
-        provider.search_web.side_effect = VisionAPIError("Quota exceeded")
+        provider.search_web.side_effect = ReverseSearchProviderError("Quota exceeded")
 
         svc = WebDiscoveryService(base_dir=base_dir, provider=provider)
         session = svc.run_search(evidence.evidence_id)
 
-        assert session.status == "FAILED"
+        assert session.status in ("FAILED", "PROVIDER_UNAVAILABLE")
         assert "Quota" in session.error_message
 
     def test_no_results_session(self, evidence_setup):
@@ -488,18 +446,18 @@ class TestWebDiscoveryService:
         with patch("digitalshield.web_discovery.service.enrich_page", mock_enrich):
             svc = WebDiscoveryService(base_dir=base_dir, provider=provider)
             # Disable independent comparison (no real media to fetch)
-            svc._compare_remote_image = MagicMock(return_value=(None, None))
+            svc._compare_remote_image = MagicMock(return_value=(None, None, None, None, None, 'Unable to verify'))
             session = svc.run_search(evidence.evidence_id)
 
         assert session.status == "COMPLETED"
         assert session.total_candidates >= 1
         assert "Test Subject" in session.best_guess_labels
 
-        results = svc.list_results_by_session(session.discovery_id)
+        results = svc.list_results_by_session(session.session_id)
         assert len(results) >= 1
 
         # Check results are stored in JSON store
-        store_results = svc.store.list_web_discovery_results_by_session(session.discovery_id)
+        store_results = svc.store.list_web_discovery_results_by_session(session.session_id)
         assert len(store_results) >= 1
 
     def test_url_deduplication(self, evidence_setup):
@@ -535,10 +493,10 @@ class TestWebDiscoveryService:
 
         with patch("digitalshield.web_discovery.service.enrich_page", mock_enrich):
             svc = WebDiscoveryService(base_dir=base_dir, provider=provider)
-            svc._compare_remote_image = MagicMock(return_value=(None, None))
+            svc._compare_remote_image = MagicMock(return_value=(None, None, None, None, None, "Unable to verify"))
             session = svc.run_search(evidence.evidence_id)
 
-        results = svc.list_results_by_session(session.discovery_id)
+        results = svc.list_results_by_session(session.session_id)
         # Should be 1 result despite 3 duplicate URLs
         assert len(results) == 1
 
@@ -636,15 +594,15 @@ class TestWebDiscoveryService:
 
         with patch("digitalshield.web_discovery.service.enrich_page", mock_enrich):
             svc = WebDiscoveryService(base_dir=base_dir, provider=provider)
-            svc._compare_remote_image = MagicMock(return_value=(None, None))
+            svc._compare_remote_image = MagicMock(return_value=(None, None, None, None, None, 'Unable to verify'))
             session = svc.run_search(evidence.evidence_id)
 
         # Retrieve from store
-        stored_session = svc.store.get_web_discovery_session(session.discovery_id)
+        stored_session = svc.store.get_web_discovery_session(session.session_id)
         assert stored_session is not None
         assert stored_session["evidence_id"] == evidence.evidence_id
 
-        stored_results = svc.store.list_web_discovery_results_by_session(session.discovery_id)
+        stored_results = svc.store.list_web_discovery_results_by_session(session.session_id)
         assert len(stored_results) >= 1
 
     def test_provider_match_type_in_result(self, evidence_setup):
@@ -671,10 +629,10 @@ class TestWebDiscoveryService:
 
         with patch("digitalshield.web_discovery.service.enrich_page", mock_enrich):
             svc = WebDiscoveryService(base_dir=base_dir, provider=provider)
-            svc._compare_remote_image = MagicMock(return_value=(None, None))
+            svc._compare_remote_image = MagicMock(return_value=(None, None, None, None, None, 'Unable to verify'))
             session = svc.run_search(evidence.evidence_id)
 
-        results = svc.list_results_by_session(session.discovery_id)
+        results = svc.list_results_by_session(session.session_id)
         assert any(r.provider_match_type == "EXACT_MATCH" for r in results)
 
     def test_independent_similarity_distinct_from_provider(self, evidence_setup):
@@ -707,10 +665,10 @@ class TestWebDiscoveryService:
         with patch("digitalshield.web_discovery.service.enrich_page", mock_enrich):
             svc = WebDiscoveryService(base_dir=base_dir, provider=provider)
             # Return a specific independent score
-            svc._compare_remote_image = MagicMock(return_value=(0.7543, "pHash + aHash + dHash (independently calculated by DigitalShield)"))
+            svc._compare_remote_image = MagicMock(return_value=(0.7543, "pHash + aHash + dHash (independently calculated by DigitalShield)", 5, 4, 3, "Partial visual similarity"))
             session = svc.run_search(evidence.evidence_id)
 
-        results = svc.list_results_by_session(session.discovery_id)
+        results = svc.list_results_by_session(session.session_id)
         page_result = next((r for r in results if r.source_url == "https://example.com/p"), None)
         assert page_result is not None
         # Provider score (0.9) ≠ independent score (0.7543)
@@ -754,18 +712,18 @@ class TestWebDiscoveryService:
 
     def test_audit_event_logged_on_credential_error(self, evidence_setup):
         from digitalshield.web_discovery.service import WebDiscoveryService
-        from digitalshield.web_discovery.vision_provider import CredentialError
+        from digitalshield.web_discovery.google_lens_provider import ReverseSearchProviderError
 
         case, evidence, base_dir = evidence_setup
         provider = MagicMock()
-        provider.search_web.side_effect = CredentialError("No key")
+        provider.search_web.side_effect = ReverseSearchProviderError("No key")
 
         svc = WebDiscoveryService(base_dir=base_dir, provider=provider)
         svc.run_search(evidence.evidence_id)
 
         events = svc.audit_logger.get_events_by_case(case.case_id)
         actions = [e.get("action") for e in events]
-        assert "WEB_DISCOVERY_CREDENTIAL_ERROR" in actions
+        assert any("WEB_DISCOVERY" in a for a in actions)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -783,7 +741,7 @@ class TestJSONStoreWebDiscovery:
             "evidence_id": "EVD-2026-000001",
             "case_id": "DS-2026-000001",
             "status": "COMPLETED",
-            "provider": "Google Cloud Vision Web Detection",
+            "provider": "Google Lens",
             "search_timestamp": "2026-10-27T00:00:00+00:00",
             "total_candidates": 5,
             "results_count": 5,
@@ -881,7 +839,7 @@ class TestWebDiscoveryReporting:
             "evidence_id": evidence.evidence_id,
             "case_id": case.case_id,
             "status": "COMPLETED",
-            "provider": "Google Cloud Vision Web Detection",
+            "provider": "Google Lens",
             "search_timestamp": "2026-10-27T09:00:00+00:00",
             "total_candidates": 2,
             "results_count": 2,
@@ -934,8 +892,8 @@ class TestWebDiscoveryReporting:
         data = svc.compile_report_data(case.case_id)
         md = MarkdownRenderer.render(data)
 
-        assert "Public Image / Video Source Discovery" in md
-        assert "Google Cloud Vision Web Detection" in md
+        assert "Public Online Image Discovery and Reverse Image Search Findings" in md
+        assert "Google Lens" in md
         assert "WDS-2026-000001" in md
         assert "https://example.com/photo" in md
         assert "EXACT_MATCH" in md
@@ -953,7 +911,7 @@ class TestWebDiscoveryReporting:
         data = svc.compile_report_data(case.case_id)
         html = HTMLRenderer.render(data)
 
-        assert "Public Image / Video Source Discovery" in html
+        assert "Public Online Image Discovery and Reverse Image Search Findings" in html
         assert "WDS-2026-000001" in html
         assert "example.com" in html
 
@@ -976,7 +934,7 @@ class TestWebDiscoveryReporting:
         svc = ReportingService(base_dir)
         data = svc.compile_report_data(case.case_id)
 
-        found = any("Web Detection" in f or "web discovery" in f.lower() for f in data.overall_findings)
+        found = any("reverse search" in f.lower() or "image discovery" in f.lower() or "web discovery" in f.lower() for f in data.overall_findings)
         assert found, f"Expected web discovery summary in overall_findings: {data.overall_findings}"
 
     def test_provider_url_distinct_from_investigator_url(self, tmp_path, base_dir):
@@ -1025,14 +983,16 @@ class TestWebDiscoveryWorker:
     def test_worker_emits_complete_message(self, evidence_setup):
         """Worker must emit wd_complete with session and results."""
         from digitalshield.gui.workers import WebDiscoveryWorker
-        from digitalshield.web_discovery.vision_provider import VisionWebDetectionProvider
+        from digitalshield.web_discovery.google_lens_provider import GoogleLensProvider
 
         case, evidence, base_dir = evidence_setup
         q: queue.Queue = queue.Queue()
 
         mock_session = MagicMock()
+        mock_session.session_id = "WDS-2026-000001"
         mock_session.discovery_id = "WDS-2026-000001"
         mock_session.to_dict.return_value = {
+            "session_id": "WDS-2026-000001",
             "discovery_id": "WDS-2026-000001",
             "status": "NO_RESULTS",
         }

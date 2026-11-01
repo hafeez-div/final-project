@@ -205,12 +205,31 @@ class ReportingService:
         if prov_records:
             overall_findings.append(f"{len(prov_records)} public URL provenance observation(s) recorded for investigative correlation.")
         if web_discovery_sessions:
-            completed = [s for s in web_discovery_sessions if s.get("status") in ("COMPLETED", "ACTIVE")]
-            total_matches = sum(s.get("total_results", 0) or s.get("results_count", 0) or s.get("total_candidates", 0) for s in completed)
-            overall_findings.append(
-                f"Public Online Image Discovery & Reverse Search: "
-                f"{len(completed)} search session(s) conducted, {total_matches} candidate public source(s) discovered."
-            )
+            total_sessions = len(web_discovery_sessions)
+            no_results_sessions = [s for s in web_discovery_sessions if s.get("status") == "NO_RESULTS"]
+            unconfigured_sessions = [s for s in web_discovery_sessions if s.get("status") in ("PROVIDER_UNAVAILABLE", "MISSING_CREDENTIALS")]
+            total_matches = sum(s.get("total_results", 0) or s.get("results_count", 0) or s.get("total_candidates", 0) for s in web_discovery_sessions)
+
+            if total_matches > 0:
+                overall_findings.append(
+                    f"Public Online Image Discovery & Reverse Search: "
+                    f"{total_sessions} search session(s) conducted, {total_matches} candidate public source(s) discovered."
+                )
+            elif no_results_sessions and not unconfigured_sessions:
+                overall_findings.append(
+                    f"Public Online Image Discovery & Reverse Search: "
+                    f"{total_sessions} search session(s) conducted; 0 candidate public sources discovered across indexed domains."
+                )
+            elif unconfigured_sessions:
+                overall_findings.append(
+                    f"Public Online Image Discovery & Reverse Search: "
+                    f"{total_sessions} search session(s) recorded; reverse search provider gateway unconfigured or missing credentials."
+                )
+            else:
+                overall_findings.append(
+                    f"Public Online Image Discovery & Reverse Search: "
+                    f"{total_sessions} search session(s) conducted, {total_matches} candidate public source(s) discovered."
+                )
 
         # 8. Standard Forensic Limitations
         limitations = [

@@ -33,9 +33,9 @@ class ProvenanceScreen(ttk.Frame):
         self._build_ui()
 
     def _build_ui(self):
-        # Header
+        # 1. Header (fixed at top)
         header = ttk.Frame(self, padding=(24, 14))
-        header.pack(fill="x")
+        header.pack(side="top", fill="x")
 
         back_btn = ttk.Button(
             header,
@@ -48,12 +48,57 @@ class ProvenanceScreen(ttk.Frame):
         title = ttk.Label(header, text="Public Source & Media Provenance", style="Heading.TLabel")
         title.pack(side="left", padx=15)
 
-        # Scrollable content area
-        content = ttk.Frame(self, padding=24)
-        content.pack(fill="both", expand=True)
+        # 2. Fixed bottom footer (packed at side="bottom" first so it stays persistently visible)
+        footer = ttk.Frame(self, padding=(24, 12))
+        footer.pack(side="bottom", fill="x")
+
+        details_btn = ttk.Button(
+            footer,
+            text="🔍 View Detailed Inspection",
+            style="Outline.TButton",
+            command=lambda: self.app.show_screen("details"),
+        )
+        details_btn.pack(side="left")
+
+        report_btn = ttk.Button(
+            footer,
+            text="📄 Generate Forensic Report",
+            style="Secondary.TButton",
+            command=lambda: self.app.show_screen("reports"),
+        )
+        report_btn.pack(side="right")
+
+        # 3. Middle scrollable area (canvas + scrollbar)
+        middle = ttk.Frame(self)
+        middle.pack(side="top", fill="both", expand=True)
+
+        canvas = tk.Canvas(middle, bg=Colors.BG, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(middle, orient="vertical", command=canvas.yview)
+        scroll_content = ttk.Frame(canvas, padding=(24, 8))
+
+        scroll_content.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all")),
+        )
+        canvas_window = canvas.create_window((0, 0), window=scroll_content, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        def _on_canvas_resize(event):
+            canvas.itemconfig(canvas_window, width=event.width)
+
+        canvas.bind("<Configure>", _on_canvas_resize)
+
+        def _on_mousewheel(event):
+            if self.winfo_ismapped():
+                canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
+        scrollbar.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
 
         # 1. Informational & Legal Scope Box
-        info_card = ttk.Frame(content, style="Card.TFrame", padding=14)
+        info_card = ttk.Frame(scroll_content, style="Card.TFrame", padding=14)
         info_card.pack(fill="x", pady=(0, 12))
 
         ttk.Label(
@@ -75,60 +120,69 @@ class ProvenanceScreen(ttk.Frame):
             wraplength=760,
         ).pack(anchor="w")
 
-        # 2. Form Card
-        form_card = ttk.Frame(content, style="Card.TFrame", padding=16)
+        # 2. Form Card with 2-Column Grid Alignment
+        form_card = ttk.Frame(scroll_content, style="Card.TFrame", padding=16)
         form_card.pack(fill="x", pady=(0, 12))
 
-        # Evidence Target Label
+        form_card.columnconfigure(0, weight=1, uniform="prov_col")
+        form_card.columnconfigure(1, weight=1, uniform="prov_col")
+
+        # Evidence Target Label (Spans 2 columns)
         self.target_lbl = ttk.Label(
             form_card,
             text="Target Evidence: Not available",
             font=Fonts.BODY_BOLD,
             foreground=Colors.TEXT_MAIN,
         )
-        self.target_lbl.pack(anchor="w", pady=(0, 10))
+        self.target_lbl.grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 10))
 
-        # Row 1: Public URL (Required)
-        ttk.Label(form_card, text="Public Source URL * (HTTP/HTTPS Required)", style="CardHeading.TLabel").pack(anchor="w", pady=(0, 2))
+        # Row 1: Public Source URL Label (Spans 2 columns)
+        ttk.Label(form_card, text="Public Source URL * (HTTP/HTTPS Required)", style="CardHeading.TLabel").grid(
+            row=1, column=0, columnspan=2, sticky="w", pady=(0, 2)
+        )
+
+        # Row 2: Public Source URL Entry (Spans 2 columns)
         self.url_var = tk.StringVar()
         self.url_entry = ttk.Entry(form_card, textvariable=self.url_var, font=Fonts.BODY)
-        self.url_entry.pack(fill="x", pady=(0, 10))
+        self.url_entry.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(0, 10))
 
-        # Row 2: Two Columns (Observed Account & Media URL)
-        row2 = ttk.Frame(form_card, style="Card.TFrame")
-        row2.pack(fill="x", pady=(0, 10))
+        # Row 3: Two Column Labels (Observed Account & Direct Media URL)
+        ttk.Label(form_card, text="Observed Account / Handle (Optional)", style="CardMuted.TLabel").grid(
+            row=3, column=0, sticky="w", padx=(0, 8), pady=(0, 2)
+        )
+        ttk.Label(form_card, text="Direct Public Media URL (Optional)", style="CardMuted.TLabel").grid(
+            row=3, column=1, sticky="w", padx=(8, 0), pady=(0, 2)
+        )
 
-        col_left = ttk.Frame(row2, style="Card.TFrame")
-        col_left.pack(side="left", fill="x", expand=True, padx=(0, 6))
-        ttk.Label(col_left, text="Observed Account / Handle (Optional)", style="CardMuted.TLabel").pack(anchor="w", pady=(0, 2))
+        # Row 4: Two Column Entries
         self.account_var = tk.StringVar()
-        ttk.Entry(col_left, textvariable=self.account_var, font=Fonts.BODY).pack(fill="x")
+        self.account_entry = ttk.Entry(form_card, textvariable=self.account_var, font=Fonts.BODY)
+        self.account_entry.grid(row=4, column=0, sticky="ew", padx=(0, 8), pady=(0, 10))
 
-        col_right = ttk.Frame(row2, style="Card.TFrame")
-        col_right.pack(side="right", fill="x", expand=True, padx=(6, 0))
-        ttk.Label(col_right, text="Direct Public Media URL (Optional)", style="CardMuted.TLabel").pack(anchor="w", pady=(0, 2))
         self.media_var = tk.StringVar()
-        ttk.Entry(col_right, textvariable=self.media_var, font=Fonts.BODY).pack(fill="x")
+        self.media_entry = ttk.Entry(form_card, textvariable=self.media_var, font=Fonts.BODY)
+        self.media_entry.grid(row=4, column=1, sticky="ew", padx=(8, 0), pady=(0, 10))
 
-        # Row 3: Two Columns (Source Timestamp & Notes)
-        row3 = ttk.Frame(form_card, style="Card.TFrame")
-        row3.pack(fill="x", pady=(0, 12))
+        # Row 5: Two Column Labels (Source Timestamp & Notes)
+        ttk.Label(form_card, text="Visible Source Timestamp (Optional)", style="CardMuted.TLabel").grid(
+            row=5, column=0, sticky="w", padx=(0, 8), pady=(0, 2)
+        )
+        ttk.Label(form_card, text="Investigator Notes (Optional)", style="CardMuted.TLabel").grid(
+            row=5, column=1, sticky="w", padx=(8, 0), pady=(0, 2)
+        )
 
-        col_ts = ttk.Frame(row3, style="Card.TFrame")
-        col_ts.pack(side="left", fill="x", expand=True, padx=(0, 6))
-        ttk.Label(col_ts, text="Visible Source Timestamp (Optional)", style="CardMuted.TLabel").pack(anchor="w", pady=(0, 2))
+        # Row 6: Two Column Entries
         self.ts_var = tk.StringVar()
-        ttk.Entry(col_ts, textvariable=self.ts_var, font=Fonts.BODY).pack(fill="x")
+        self.ts_entry = ttk.Entry(form_card, textvariable=self.ts_var, font=Fonts.BODY)
+        self.ts_entry.grid(row=6, column=0, sticky="ew", padx=(0, 8), pady=(0, 12))
 
-        col_notes = ttk.Frame(row3, style="Card.TFrame")
-        col_notes.pack(side="right", fill="x", expand=True, padx=(6, 0))
-        ttk.Label(col_notes, text="Investigator Notes (Optional)", style="CardMuted.TLabel").pack(anchor="w", pady=(0, 2))
         self.notes_var = tk.StringVar()
-        ttk.Entry(col_notes, textvariable=self.notes_var, font=Fonts.BODY).pack(fill="x")
+        self.notes_entry = ttk.Entry(form_card, textvariable=self.notes_var, font=Fonts.BODY)
+        self.notes_entry.grid(row=6, column=1, sticky="ew", padx=(8, 0), pady=(0, 12))
 
-        # Submit Button & Status
+        # Row 7: Submit Button & Status
         btn_bar = ttk.Frame(form_card, style="Card.TFrame")
-        btn_bar.pack(fill="x")
+        btn_bar.grid(row=7, column=0, columnspan=2, sticky="ew", pady=(2, 0))
 
         self.record_btn = ttk.Button(
             btn_bar,
@@ -142,13 +196,16 @@ class ProvenanceScreen(ttk.Frame):
         self.status_lbl.pack(side="left", padx=12)
 
         # 3. Recorded Observations Log
-        obs_card = ttk.Frame(content, style="Card.TFrame", padding=14)
-        obs_card.pack(fill="both", expand=True, pady=(0, 14))
+        obs_card = ttk.Frame(scroll_content, style="Card.TFrame", padding=14)
+        obs_card.pack(fill="both", expand=True, pady=(0, 8))
 
         ttk.Label(obs_card, text="Recorded Provenance Observations for Active Case", style="CardHeading.TLabel").pack(anchor="w", pady=(0, 6))
 
+        text_frame = ttk.Frame(obs_card)
+        text_frame.pack(fill="both", expand=True)
+
         self.records_text = tk.Text(
-            obs_card,
+            text_frame,
             wrap="word",
             font=Fonts.MONO,
             bg=Colors.CARD_BG,
@@ -159,30 +216,10 @@ class ProvenanceScreen(ttk.Frame):
             pady=10,
             height=6,
         )
-        scrollbar = ttk.Scrollbar(obs_card, orient="vertical", command=self.records_text.yview)
-        self.records_text.configure(yscrollcommand=scrollbar.set)
-        scrollbar.pack(side="right", fill="y")
+        scrollbar_records = ttk.Scrollbar(text_frame, orient="vertical", command=self.records_text.yview)
+        self.records_text.configure(yscrollcommand=scrollbar_records.set)
+        scrollbar_records.pack(side="right", fill="y")
         self.records_text.pack(side="left", fill="both", expand=True)
-
-        # 4. Action Bar
-        bottom_bar = ttk.Frame(content)
-        bottom_bar.pack(fill="x")
-
-        details_btn = ttk.Button(
-            bottom_bar,
-            text="🔍 View Detailed Inspection",
-            style="Outline.TButton",
-            command=lambda: self.app.show_screen("details"),
-        )
-        details_btn.pack(side="left")
-
-        report_btn = ttk.Button(
-            bottom_bar,
-            text="📄 Generate Forensic Report",
-            style="Secondary.TButton",
-            command=lambda: self.app.show_screen("reports"),
-        )
-        report_btn.pack(side="right")
 
     def load_data(self, data: dict):
         """Populate screen with current case/evidence info and recorded provenance."""

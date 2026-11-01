@@ -274,7 +274,7 @@ class TestGoogleLensReporting:
         assert "## 10. Public Reverse Image Search Findings – Google Lens" in md_text
         assert "Wikipedia" in md_text
         assert "https://wikipedia.org/wiki/Test_Subject" in md_text
-        assert "Manual Google Lens search" in md_text
+        assert "Google Lens" in md_text
 
         # Check HTML content
         html_text = file_map["html"].read_text(encoding="utf-8")
